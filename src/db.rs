@@ -6,7 +6,15 @@ use tokio_postgres::{NoTls, Error, Client};
 pub struct NFT {
     name_hash: String,
     address: String,
-    name: String
+    name: String,
+}
+
+#[derive(Serialize)]
+pub struct NFTWithPrimary {
+    name_hash: String,
+    address: String,
+    name: String,
+    is_primary_name: bool,
 }
 
 #[derive(Serialize)]
@@ -29,10 +37,11 @@ async fn connect() -> Result<Client, Error> {
     Ok(client)
 }
 
-pub async fn get_names_by_addr(address: &str) -> Result<Vec<NFT>, Error> {
+pub async fn get_names_by_addr(address: &str) -> Result<Vec<NFTWithPrimary>, Error> {
     let client = connect().await?;
-    let query = format!("select ao.id,ao.name_hash,ao.address,an.name from ans.ans_nft_owner as ao 
-        INNER JOIN ans.ans_name as an on ao.name_hash = an.name_hash
+    let query = format!("select ao.id, ao.name_hash, ao.address, an.name, ap.id from ans.ans_nft_owner as ao 
+            JOIN ans.ans_name as an ON ao.name_hash = an.name_hash
+            LEFT JOIN ans.ans_primary_name as ap ON ao.name_hash = ap.name_hash
             where ao.address = '{}'", address);
     let _rows = client.query(&query, &[]).await?;
 
@@ -40,10 +49,17 @@ pub async fn get_names_by_addr(address: &str) -> Result<Vec<NFT>, Error> {
     let mut nft_list = Vec::new();
 
     for row in _rows {
-        let nft = NFT {
+        let primary_id: Option<i64> = row.get(4);
+        let is_primary = match primary_id {
+            Some(pid) => pid > 0,
+            None => false,
+        };
+        
+        let nft = NFTWithPrimary {
             name_hash: row.get(1),
             address: row.get(2),
-            name: row.get(3)
+            name: row.get(3),
+            is_primary_name: is_primary,
         };
         nft_list.push(nft);
     }
@@ -74,7 +90,7 @@ pub async fn get_resolvers_by_namehash(name_hash: &str) -> Result<Vec<Resolver>,
 
 pub async fn get_subdomains_by_namehash(name_hash: &str) -> Result<Vec<NFT>, Error> {
     let client = connect().await?;
-    let query = format!("select id,name from ans.ans_name where parent = '{}'", name_hash);
+    let query = format!("select id,name_hash, name from ans.ans_name where parent = '{}'", name_hash);
     let _rows = client.query(&query, &[]).await?;
 
     println!("query db: {}", query);
@@ -82,9 +98,9 @@ pub async fn get_subdomains_by_namehash(name_hash: &str) -> Result<Vec<NFT>, Err
 
     for row in _rows {
         let r = NFT {
-            name_hash: "".to_string(),
+            name_hash: row.get(1),
             address: "".to_string(),
-            name: row.get(1),
+            name: row.get(2),
         };
         subdomains.push(r);
     }
