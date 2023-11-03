@@ -90,17 +90,26 @@ pub async fn get_resolvers_by_namehash(name_hash: &str) -> Result<Vec<Resolver>,
 
 pub async fn get_subdomains_by_namehash(name_hash: &str) -> Result<Vec<NFT>, Error> {
     let client = connect().await?;
-    let query = format!("select id,name_hash, name from ans.ans_name where parent = '{}'", name_hash);
+    let query = format!("select an.id, an.name_hash, an.name, ao.address from ans.ans_name as an
+            LEFT JOIN ans.ans_nft_owner as ao ON an.name_hash = ao.name_hash
+                WHERE parent = '{}'", name_hash);
     let _rows = client.query(&query, &[]).await?;
 
     println!("query db: {}", query);
     let mut subdomains = Vec::new();
 
     for row in _rows {
+        let address: Option<String> = row.get(3);
+        let address = match address {
+            Some(addr) => addr,
+            None => "".to_string(),
+        };
+
+
         let r = NFT {
             name_hash: row.get(1),
-            address: "".to_string(),
             name: row.get(2),
+            address: address,
         };
         subdomains.push(r);
     }
