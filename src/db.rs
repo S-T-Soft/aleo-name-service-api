@@ -85,10 +85,12 @@ pub async fn get_names_by_addr(address: &str) -> Result<Vec<NFTWithPrimary>, Err
 
 pub async fn get_resolvers_by_namehash(name_hash: &str) -> Result<Vec<Resolver>, Error> {
     let client = connect().await?;
-    let query = format!("select id,category,version,name from ans.ans_resolver where name_hash = '{}'", name_hash);
+    let query = format!("select ar.id, ar.category, ar.version, ar.name from ans.ans_resolver As ar
+        LEFT JOIN ans.ans_name_version as av ON ar.name_hash = av.name_hash
+        WHERE ar.version=av.version and ar.name_hash = '{}'", name_hash);
+    println!("query db: {}", &query);
     let _rows = client.query(&query, &[]).await?;
 
-    println!("query db: {}", query);
     let mut resolver_list = Vec::new();
 
     for row in _rows {
