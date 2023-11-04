@@ -15,6 +15,7 @@ pub struct NFTWithPrimary {
     address: String,
     name: String,
     is_primary_name: bool,
+    resolver: String,
 }
 
 #[derive(Serialize)]
@@ -39,8 +40,16 @@ async fn connect() -> Result<Client, Error> {
 
 pub async fn get_names_by_addr(address: &str) -> Result<Vec<NFTWithPrimary>, Error> {
     let client = connect().await?;
-    let query = format!("select ao.id, ao.name_hash, ao.address, an.name, ap.id from ans.ans_nft_owner as ao 
-            JOIN ans.ans_name as an ON ao.name_hash = an.name_hash
+    let query = format!("select ao.id, ao.name_hash, ao.address, an.name, ap.id, an.resolver from ans.ans_nft_owner as ao 
+            JOIN (WITH RECURSIVE cte AS (SELECT name_hash, CAST(name AS character varying), parent, resolver
+                    FROM ans.ans_name
+                    WHERE 1=1
+                    UNION ALL
+                    SELECT cte.name_hash, cte.name || '.' || t.name, t.parent, cte.resolver
+                    FROM ans.ans_name t INNER JOIN cte ON t.name_hash = cte.parent
+                )
+                SELECT * FROM cte where parent = '0field'
+            ) as an ON ao.name_hash = an.name_hash
             LEFT JOIN ans.ans_primary_name as ap ON ao.name_hash = ap.name_hash
             where ao.address = '{}'", address);
     let _rows = client.query(&query, &[]).await?;
@@ -54,12 +63,19 @@ pub async fn get_names_by_addr(address: &str) -> Result<Vec<NFTWithPrimary>, Err
             Some(pid) => pid > 0,
             None => false,
         };
+
+        let resolver: Option<String> = row.get(5);
+        let resolver = match resolver {
+            Some(resolver) => resolver,
+            None => "".to_string(),
+        };
         
         let nft = NFTWithPrimary {
             name_hash: row.get(1),
             address: row.get(2),
             name: row.get(3),
             is_primary_name: is_primary,
+            resolver: resolver,
         };
         nft_list.push(nft);
     }
