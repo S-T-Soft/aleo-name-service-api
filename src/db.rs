@@ -22,7 +22,7 @@ pub struct Resolver {
     name_hash: String,
     category: String,
     name: String,
-    version: i64
+    version: i32
 }
 
 async fn connect() -> Result<Client, Error> {
