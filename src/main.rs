@@ -57,15 +57,13 @@ async fn name_to_hash(name: web::Path<String>) -> impl Responder {
 }
 
 #[get("/hash_to_name/{name_hash}")]
-async fn hash_to_name(pool: web::Data<Pool>, name_hash: web::Path<String>) -> impl Responder {
+async fn hash_to_name(_pool: web::Data<Pool>, name_hash: web::Path<String>) -> impl Responder {
     let name_hash = name_hash.into_inner();
-    let name = client::get_full_name(&pool,name_hash.clone());
+    let nft = db::get_name_by_namehash(&name_hash).await;
 
-    match name.await {
-        Ok(name) => HttpResponse::Ok().json(NameHash { name_hash, name }),
-        Err(_e) => {
-            HttpResponse::NotFound().finish()
-        },
+    match nft {
+        Ok(data) => HttpResponse::Ok().json(NameHash {name_hash: data.name_hash, name: data.name}),
+        Err(_e) => HttpResponse::NotFound().finish(),
     }
 }
 
