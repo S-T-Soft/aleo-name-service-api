@@ -1,0 +1,35 @@
+version: '2'
+
+services:
+  redis:
+    image: redis:alpine
+    restart: always
+    volumes:
+      - ./.redis:/data
+    ports:
+      - "6378:6379"
+
+  api:
+    build:
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      URL_HOST: https://api.explorer.aleo.org/v1
+      PROGRAM: aleo_name_service_registry_v1.aleo
+      REDIS_URL: redis://redis:6378/0
+      DATABASE_URL: postgresql://casaos:casaos@10.0.0.17:5432/aleoe
+      VIRTUAL_HOST: api.aleonames.id,api.aleonames.local
+      LOG_STORE: ans
+    restart: always
+
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      LOG_STORE: ans
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - /etc/nginx/certs:/etc/nginx/certs:ro
