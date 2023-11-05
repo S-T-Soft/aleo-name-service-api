@@ -5,28 +5,28 @@ use snarkvm_console_network::{Network, Testnet3, ToFields};
 type N = Testnet3;
 
 
-pub fn string_to_u128(s: &str) -> Result<u128, String> {
-    // Check if all characters are valid
-    if !s.chars().all(|c| c.is_ascii_lowercase() || c.is_digit(10) || c == '-' || c == '_') {
-        return Err("Invalid character found".to_string());
-    }
+// pub fn string_to_u128(s: &str) -> Result<u128, String> {
+//     // Check if all characters are valid
+//     if !s.chars().all(|c| c.is_ascii_lowercase() || c.is_digit(10) || c == '-' || c == '_') {
+//         return Err("Invalid character found".to_string());
+//     }
 
-    let mut bytes = s.as_bytes().to_vec();
+//     let mut bytes = s.as_bytes().to_vec();
 
-    if bytes.len() > 16 {
-        return Err("The string is too long".to_string());
-    }
+//     if bytes.len() > 16 {
+//         return Err("The string is too long".to_string());
+//     }
 
-    // Pad the vector with zeros
-    while bytes.len() < 16 {
-        bytes.push(0);
-    }
+//     // Pad the vector with zeros
+//     while bytes.len() < 16 {
+//         bytes.push(0);
+//     }
 
-    let mut bits = [0u8; 16];
-    bits.copy_from_slice(&bytes);
+//     let mut bits = [0u8; 16];
+//     bits.copy_from_slice(&bytes);
 
-    Ok( u128::from_le_bytes([bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7], bits[8], bits[9], bits[10], bits[11], bits[12], bits[13], bits[14], bits[15]]) )
-}
+//     Ok( u128::from_le_bytes([bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7], bits[8], bits[9], bits[10], bits[11], bits[12], bits[13], bits[14], bits[15]]) )
+// }
 
 // Parse a name
 pub fn parse_label_string(name: &str, valid: bool) -> Result<String, String> {

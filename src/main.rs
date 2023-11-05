@@ -149,6 +149,9 @@ async fn resolvers(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Path<
 #[get("/subdomain/{name}")]
 async fn subdomains(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Path<String>) -> impl Responder {
     let name = name.into_inner();
+    if "ans".eq(&name) {
+        return HttpResponse::NotFound().finish();
+    }
 
     let name_hash = utils::parse_name_hash(&name);
     let name_hash = match name_hash {

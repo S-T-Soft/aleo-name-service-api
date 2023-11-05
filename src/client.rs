@@ -2,7 +2,7 @@ use reqwest;
 use std::env;
 use regex::Regex;
 use serde::Deserialize;
-use urlencoding;
+// use urlencoding;
 use crate::utils;
 use deadpool_redis::{Pool, redis::{cmd}};
 
@@ -178,18 +178,18 @@ pub async fn get_primary_name_hash(address: &str) -> Result<String, String> {
     Ok( resp.to_string() )
 }
 
-pub async fn get_resolver(category: &str, name: &str) -> Result<String, String> {
-    // get name_hash from name
-    let name_hash = utils::parse_name_hash(name)?;
-    let category = utils::string_to_u128(&category)?;
-    // get resolver from name_hash and category
-    let resolver = format!("{{name:{}, category:{}u128, version: 1u64}}", name_hash, category);
-    // encode resolver with urlencoding
-    let resolver_encoded = urlencoding::encode(&resolver);
-    let url = format!("{}/mapping/resolvers/{}", get_base_uri(), resolver_encoded);
-    let resp = call_api(url).await?;
-    let json = parse(&resp);
-    let name: [u128; 4] = serde_json::from_str(&json).map_err(|_| "Failed to convert to json")?;
-    let content = utils::reverse_parse_label(name[0], name[1], name[2], name[3])?;
-    Ok( content )
-}
+// pub async fn get_resolver(category: &str, name: &str) -> Result<String, String> {
+//     // get name_hash from name
+//     let name_hash = utils::parse_name_hash(name)?;
+//     let category = utils::string_to_u128(&category)?;
+//     // get resolver from name_hash and category
+//     let resolver = format!("{{name:{}, category:{}u128, version: 1u64}}", name_hash, category);
+//     // encode resolver with urlencoding
+//     let resolver_encoded = urlencoding::encode(&resolver);
+//     let url = format!("{}/mapping/resolvers/{}", get_base_uri(), resolver_encoded);
+//     let resp = call_api(url).await?;
+//     let json = parse(&resp);
+//     let name: [u128; 4] = serde_json::from_str(&json).map_err(|_| "Failed to convert to json")?;
+//     let content = utils::reverse_parse_label(name[0], name[1], name[2], name[3])?;
+//     Ok( content )
+// }
