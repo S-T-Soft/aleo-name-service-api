@@ -335,6 +335,7 @@ version = "0.1.0"
 dependencies = [
  "actix-cors",
  "actix-web",
+ "deadpool-postgres",
  "deadpool-redis",
  "lazy_static",
  "regex",
@@ -705,22 +706,33 @@ dependencies = [
 
 [[package]]
 name = "deadpool"
-version = "0.9.5"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421fe0f90f2ab22016f32a9881be5134fdd71c65298917084b0c7477cbc3856e"
+checksum = "fb84100978c1c7b37f09ed3ce3e5f843af02c2a2c431bae5b19230dad2c1b490"
 dependencies = [
  "async-trait",
  "deadpool-runtime",
  "num_cpus",
- "retain_mut",
  "tokio",
 ]
 
 [[package]]
-name = "deadpool-redis"
-version = "0.12.0"
+name = "deadpool-postgres"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f1760f60ffc6653b4afd924c5792098d8c00d9a3deb6b3d989eac17949dc422"
+checksum = "40b75ba49590d27f677d3bebaf76cd15889ca8b308bc7ba99bfa25f1d7269c13"
+dependencies = [
+ "deadpool",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+]
+
+[[package]]
+name = "deadpool-redis"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84930e585871d35b8e06d3e03d03e3a8a4c5dc71afa4376c7cd5f9223e1da1ea"
 dependencies = [
  "deadpool",
  "redis",
@@ -1804,12 +1816,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "retain_mut"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2588,7 +2594,19 @@ dependencies = [
  "cfg-if",
  "log",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.31",
+ "syn 2.0.38",
 ]
 
 [[package]]
