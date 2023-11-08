@@ -89,17 +89,17 @@ pub fn parse_name_hash(name: &str) -> Result<Field<N>, String> {
 }
 
 
-pub fn reverse_parse_label(n1: u128, n2: u128, n3: u128, n4: u128) -> Result<String, String> {
-    let mut bytes = [0u8; 64];
-
-    bytes[0..16].copy_from_slice(&n1.to_le_bytes());
-    bytes[16..32].copy_from_slice(&n2.to_le_bytes());
-    bytes[32..48].copy_from_slice(&n3.to_le_bytes());
-    bytes[48..64].copy_from_slice(&n4.to_le_bytes());
-
-    let mut name = String::from_utf8(bytes.to_vec()).map_err(|_| "Failed to convert bytes to UTF-8")?;
-
-    name = name.trim_end_matches(char::from(0)).to_string();
-
-    Ok(name)
-}
+// pub fn reverse_parse_label(n1: u128, n2: u128, n3: u128, n4: u128) -> Result<String, String> {
+//     let mut bytes = [0u8; 64];
+//
+//     bytes[0..16].copy_from_slice(&n1.to_le_bytes());
+//     bytes[16..32].copy_from_slice(&n2.to_le_bytes());
+//     bytes[32..48].copy_from_slice(&n3.to_le_bytes());
+//     bytes[48..64].copy_from_slice(&n4.to_le_bytes());
+//
+//     let mut name = String::from_utf8(bytes.to_vec()).map_err(|_| "Failed to convert bytes to UTF-8")?;
+//
+//     name = name.trim_end_matches(char::from(0)).to_string();
+//
+//     Ok(name)
+// }
