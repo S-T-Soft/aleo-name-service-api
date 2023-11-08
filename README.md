@@ -36,6 +36,20 @@ This API endpoint accepts query parameters `name` and `category` and returns a `
 - **Success Response:** `200 OK` with JSON body: `{ "content": "<content>", "name": "<name>", "category": "<category>" }`
 - **Error Response:** `404 Not Found`
 
+### 5. `GET /api/v1/public_ans/{address}`
+
+This API endpoint accepts a path parameter `address` and returns `Vec<NFTWithPrimary>` object.
+
+- **URL Params:** `address` (required)
+- **Success Response:** `200 OK` with JSON body: `{ "address": "<address>", "name": "<name>", "name_hash": "<name_hash>", "is_primary_name": "<is_primary_name>", "resolver": "<resolver>" }`
+- **Error Response:** `404 Not Found`
+
+### 6. `GET /api/v1/subdomain/{name}`
+This API endpoint accepts a path parameter `name` and returns List subdomains
+
+### 7. `GET /api/v1/resolver/{name}`
+This API endpoint accepts a path parameter `name` and returns List ResolverContent
+
 ## Running the server
 
 To start the server in local, run the following command:
@@ -44,7 +58,7 @@ To start the server in local, run the following command:
 cargo run
 ```
 
-The server will start on localhost port 8000.
+The server will start on localhost port 8080.
 
 ## Note
 Error handling is implemented in the code, so if an error occurs (like parsing errors), the server will respond with an appropriate HTTP status code and error message.
