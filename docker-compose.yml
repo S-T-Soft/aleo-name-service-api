@@ -13,8 +13,8 @@ services:
     build:
       context: ./
       dockerfile: Dockerfile
-    depends_on:
-      - redis
+#    depends_on:
+#      - redis
     environment:
       URL_HOST: https://api.explorer.aleo.org/v1
       PROGRAM: aleo_name_service_registry_v1.aleo
