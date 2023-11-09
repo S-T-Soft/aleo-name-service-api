@@ -94,7 +94,7 @@ async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Pat
 
     match address.await {
         Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
-        Err(_e) => HttpResponse::NotFound().finish(),
+        Err(_e) => HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() }),
     }
 }
 
