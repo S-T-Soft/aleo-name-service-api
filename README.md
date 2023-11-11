@@ -50,6 +50,9 @@ This API endpoint accepts a path parameter `name` and returns List subdomains
 ### 7. `GET /api/v1/resolver/{name}`
 This API endpoint accepts a path parameter `name` and returns List ResolverContent
 
+### 8. `GET /api/v1/token/{name_hash}`
+### 9. `GET /api/v1/token/{name_hash}.png`
+
 ## Running the server
 
 To start the server in local, run the following command:

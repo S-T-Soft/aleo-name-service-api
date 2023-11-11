@@ -1,5 +1,52 @@
 use serde::Serialize;
 
+// resp
+#[derive(Serialize)]
+pub struct AddressName {
+    pub address: String,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct NameHash {
+    pub name_hash: String,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct ResolverContent {
+    pub category: String,
+    pub name: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+pub struct AnsToken {
+    pub name: String,
+    pub image: String,
+    pub attributes: Vec<AnsTokenAttr>,
+    #[serde(rename = "mintNumber")]
+    pub mint_number: i32,
+    #[serde(rename = "collectionLink")]
+    pub collection_link: String,
+    #[serde(rename = "collectionName")]
+    pub collection_name: String,
+    #[serde(rename = "collectionDescription")]
+    pub collection_description: String,
+    #[serde(rename = "sourceLink")]
+    pub source_link: String,
+
+}
+
+#[derive(Serialize)]
+pub struct AnsTokenAttr {
+    pub trait_type: String,
+    pub value: String,
+}
+
+
+
+// db
 #[derive(Serialize)]
 pub struct NFT {
     pub name_hash: String,

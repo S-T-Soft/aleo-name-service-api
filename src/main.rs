@@ -1,40 +1,22 @@
 use actix_web::{App, get, HttpResponse, HttpServer, Responder, web};
 use actix_cors::Cors;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json;
 // use deadpool_redis::{Config, Runtime, Pool};
 use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
+use models::*;
 
 mod utils;
 mod client;
 mod db;
 mod models;
 
-#[derive(Serialize)]
-struct NameHash {
-    name_hash: String,
-    name: String,
-}
-
-#[derive(Serialize)]
-struct AddressName {
-    address: String,
-    name: String,
-}
-
 #[derive(Deserialize)]
 struct GetResolverParams {
     name: String,
     category: String,
-}
-
-#[derive(Serialize)]
-struct ResolverContent {
-    category: String,
-    name: String,
-    content: String,
 }
 
 #[get("/name_to_hash/{name}")]
@@ -44,18 +26,12 @@ async fn name_to_hash(name: web::Path<String>) -> impl Responder {
     let name_hash = match name_hash {
         Ok(value) => value.to_string(),
         Err(e) => {
-            // Handle the error here
             println!("Error parsing name: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({ "error": format!("Error parsing name: {}", e) }));
         }
     };
 
-    let result = NameHash {
-        name_hash,
-        name,
-    };
-
-    HttpResponse::Ok().json(result)
+    HttpResponse::Ok().json(NameHash { name_hash, name, })
 }
 
 #[get("/hash_to_name/{name_hash}")]
@@ -177,6 +153,65 @@ async fn subdomains(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Path
     }
 }
 
+#[get("/token/{name_hash}.svg")]
+async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path<String>) -> impl Responder {
+    let name_hash = name_hash.into_inner();
+    if name_hash.is_empty() {
+        return HttpResponse::NotFound().finish();
+    }
+
+    let nft = db::get_name_by_namehash(&db_pool, &name_hash);
+
+    match nft.await {
+        Ok(nft) => {
+            let svg_content = include_str!("./file/demo.svg");
+            HttpResponse::Ok()
+                .content_type("image/svg+xml")
+                .body(svg_content.replace("{aleonameservice}", &nft.name))
+        },
+        Err(_e) => HttpResponse::NotFound().finish(),
+    }
+}
+
+#[get("/token/{name_hash}")]
+async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path<String>) -> impl Responder {
+    let name_hash = name_hash.into_inner();
+    if name_hash.is_empty() {
+        return HttpResponse::NotFound().finish();
+    }
+
+    let nft = db::get_name_by_namehash(&db_pool, &name_hash);
+    match nft.await {
+        Ok(nft) => {
+            let mut attributes = Vec::new();
+
+            let level = nft.name.chars().filter(|&c| c == '.').count();
+            let level = if level > 1 { level - 1 } else { 0 };
+            attributes.push(AnsTokenAttr {trait_type: "level".to_string(), value: level.to_string() });
+            let name_length = match nft.name.chars().position(|c| c == '.') {
+                Some(index) => index,
+                None => 0,
+            };
+            attributes.push(AnsTokenAttr {trait_type: "length".to_string(), value: name_length.to_string()});
+
+            let ans_token = AnsToken {
+                name: nft.name,
+                image: format!("https://api.aleonames.id/token/{}.svg", &name_hash),
+                attributes,
+                mint_number: 1i32,
+                collection_name: "ANS".to_string(),
+                collection_link: "https://aleonames.id".to_string(),
+                collection_description: "Aleo Name Service".to_string(),
+                source_link: format!("https://api.aleonames.id/token/{}", &name_hash),
+            };
+
+            HttpResponse::Ok().json(ans_token)
+        },
+        Err(_e) => HttpResponse::NotFound().finish(),
+    }
+}
+
+
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -209,6 +244,9 @@ async fn main() -> std::io::Result<()> {
             .service(public_ans)
             .service(resolvers)
             .service(subdomains)
+            .service(token_png)
+            .service(token)
+
             
     })
     .bind("0.0.0.0:8080")?
