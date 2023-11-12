@@ -186,7 +186,6 @@ async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path
             let mut attributes = Vec::new();
 
             let level = nft.name.chars().filter(|&c| c == '.').count();
-            let level = if level > 1 { level - 1 } else { 0 };
             attributes.push(AnsTokenAttr {trait_type: "level".to_string(), value: level.to_string() });
             let name_length = match nft.name.chars().position(|c| c == '.') {
                 Some(index) => index,
