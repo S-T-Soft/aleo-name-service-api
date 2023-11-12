@@ -1,3 +1,4 @@
+use std::cmp::min;
 use snarkvm_console_program::{Field, Value};
 use snarkvm_console_network::prelude::Zero;
 use snarkvm_console_network::{Network, Testnet3, ToFields};
@@ -103,3 +104,12 @@ pub fn parse_name_hash(name: &str) -> Result<Field<N>, String> {
 //
 //     Ok(name)
 // }
+
+pub fn split_string(input: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+
+    for i in (0..input.len()).step_by(15) {
+        result.push(&input[i..i + min(15, input.len() - i )]);
+    }
+    result
+}

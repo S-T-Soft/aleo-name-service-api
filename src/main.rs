@@ -165,9 +165,20 @@ async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::
     match nft.await {
         Ok(nft) => {
             let svg_content = include_str!("./file/demo.svg");
+            let name_parts = utils::split_string(&nft.name);
+            let mut name_texts = Vec::new();
+            for i in 0..name_parts.len() {
+                let mut dy = 0.0;
+                if name_parts.len() > 1 {
+                    dy = if i == 0 { -1.2 * (name_parts.len() - 1) as f64 } else { 1.2 };
+                }
+                let name_text = format!("<tspan x=\"32\" dy=\"{}em\">{}</tspan>", dy, name_parts.get(i).unwrap());
+                name_texts.push(name_text);
+            }
+
             HttpResponse::Ok()
                 .content_type("image/svg+xml")
-                .body(svg_content.replace("{aleonameservice}", &nft.name))
+                .body(svg_content.replace("{aleonameservice}", &name_texts.join("")))
         },
         Err(_e) => HttpResponse::NotFound().finish(),
     }
