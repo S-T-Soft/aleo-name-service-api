@@ -200,7 +200,7 @@ async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path
             attributes.push(AnsTokenAttr {trait_type: "level".to_string(), value: level.to_string() });
             let name_length = match nft.name.chars().position(|c| c == '.') {
                 Some(index) => index,
-                None => 0,
+                None => nft.name.len(),
             };
             attributes.push(AnsTokenAttr {trait_type: "length".to_string(), value: name_length.to_string()});
 
