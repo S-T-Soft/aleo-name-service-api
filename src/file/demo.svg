@@ -5,7 +5,11 @@
             <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.225" width="200%" height="200%"/>
         </filter>
     </defs>
-    <path  id="路径 1" style="fill:#000000; opacity:1;" d="M13,93.5092v-80.50004c0,-4.96193 6.44757,-6.89386 9.17615,-2.74952l52.99995,80.49996l-4.1761,2.7496h-5v-80.50004h10v80.50004c0,4.9619 -6.4476,6.8938 -9.1761,2.7495l-53.00004,-80.50003l4.17615,-2.74951h5v80.50004z" filter="url(#dropShadow)" />
+
+    <path style=" stroke:none;fill-rule:nonzero;fill:rgb(100%,100%,100%);fill-opacity:1;" d="M 36.035156 52.03125 L 40.121094 59.984375 L 48.515625 56.414062 L 44.484375 48.433594 Z M 36.035156 52.03125 "/>
+    <path style=" stroke:none;fill-rule:nonzero;fill:rgb(100%,100%,100%);fill-opacity:1;" d="M 64.890625 49.441406 L 60.800781 41.484375 L 52.761719 44.90625 L 56.796875 52.886719 Z M 64.890625 49.441406 "/>
+    <path style=" stroke:none;fill-rule:nonzero;fill:rgb(100%,100%,100%);fill-opacity:1;" d="M 78.785156 15.082031 L 69.535156 15.082031 L 69.535156 73.4375 L 67.175781 73.4375 L 56.796875 52.886719 L 48.515625 56.414062 L 62.109375 83.324219 L 62.269531 83.636719 L 78.785156 83.636719 Z M 78.785156 15.082031 "/>
+    <path style=" stroke:none;fill-rule:nonzero;fill:rgb(100%,100%,100%);fill-opacity:1;" d="M 39.050781 17.761719 L 37.695312 15.082031 L 21.210938 15.082031 L 21.210938 83.636719 L 30.464844 83.636719 L 30.464844 25.34375 L 32.820312 25.34375 L 44.484375 48.433594 L 52.761719 44.90625 Z M 39.050781 17.761719 "/>
 
     <text
             x="32"
@@ -31,7 +35,7 @@
             }
         </style>
         <linearGradient id="paint0_linear" x1="190.5" y1="302" x2="-64" y2="-172.5" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#BCF0"/>
+            <stop stop-color="#44BCF0"/>
             <stop offset="0.428185" stop-color="#628BF3"/>
             <stop offset="1" stop-color="#A099FF"/>
         </linearGradient>
