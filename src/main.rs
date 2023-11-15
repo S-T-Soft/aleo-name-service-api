@@ -204,15 +204,16 @@ async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path
             };
             attributes.push(AnsTokenAttr {trait_type: "length".to_string(), value: name_length.to_string()});
 
+            let ans_api_url = env::var("ANS_API_URL").unwrap_or_else(|_| "https://api.aleonames.id".to_string());
             let ans_token = AnsToken {
                 name: nft.name,
-                image: format!("https://api.aleonames.id/token/{}.svg", &name_hash),
+                image: format!("{}/token/{}.svg", &ans_api_url, &name_hash),
                 attributes,
                 mint_number: 1i32,
                 collection_name: "ANS".to_string(),
                 collection_link: "https://aleonames.id".to_string(),
                 collection_description: "Aleo Name Service".to_string(),
-                source_link: format!("https://api.aleonames.id/token/{}", &name_hash),
+                source_link: format!("{}/token/{}", &ans_api_url, &name_hash),
             };
 
             HttpResponse::Ok().json(ans_token)
