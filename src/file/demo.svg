@@ -1,8 +1,8 @@
 <svg width="270" height="270" viewBox="0 0 270 270" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="270" height="270" fill="url(#paint0_linear)"/>
     <defs>
-        <filter id="dropShadow" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="270" width="270">
-            <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.225" width="200%" height="200%"/>
+        <filter id="dropShadow" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="270" width="284">
+            <feDropShadow dx="0" dy="2" stdDeviation="1" flood-opacity="0.425" />
         </filter>
     </defs>
 
@@ -11,14 +11,7 @@
     <path style=" stroke:none;fill-rule:nonzero;fill:rgb(100%,100%,100%);fill-opacity:1;" d="M 78.785156 15.082031 L 69.535156 15.082031 L 69.535156 73.4375 L 67.175781 73.4375 L 56.796875 52.886719 L 48.515625 56.414062 L 62.109375 83.324219 L 62.269531 83.636719 L 78.785156 83.636719 Z M 78.785156 15.082031 "/>
     <path style=" stroke:none;fill-rule:nonzero;fill:rgb(100%,100%,100%);fill-opacity:1;" d="M 39.050781 17.761719 L 37.695312 15.082031 L 21.210938 15.082031 L 21.210938 83.636719 L 30.464844 83.636719 L 30.464844 25.34375 L 32.820312 25.34375 L 44.484375 48.433594 L 52.761719 44.90625 Z M 39.050781 17.761719 "/>
 
-    <text
-            x="26"
-            y="232"
-            font-size="26px"
-            fill="white"
-            filter="url(#dropShadow)">
-        {aleonameservice}
-    </text>
+    <text x="24" y="232" font-size="26px" fill="white" filter="url(#dropShadow)">{aleonameservice}</text>
 
     <defs>
         <style>
@@ -31,7 +24,7 @@
             font-family: 'Satoshi', sans-serif;
             font-feature-settings: "ss01" on, "ss03" on;
             -moz-font-feature-settings: "ss01" on, "ss03" on;
-            line-height: 34px;
+            line-height: 32px;
             }
         </style>
         <linearGradient id="paint0_linear" x1="190.5" y1="302" x2="-64" y2="-172.5" gradientUnits="userSpaceOnUse">

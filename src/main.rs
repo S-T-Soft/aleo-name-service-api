@@ -172,7 +172,7 @@ async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::
                 if name_parts.len() > 1 {
                     dy = if i == 0 { -1.2 * (name_parts.len() - 1) as f64 } else { 1.2 };
                 }
-                let name_text = format!("<tspan x=\"32\" dy=\"{}em\">{}</tspan>", dy, name_parts.get(i).unwrap());
+                let name_text = format!("<tspan x=\"26\" dy=\"{}em\">{}</tspan>", dy, name_parts.get(i).unwrap());
                 name_texts.push(name_text);
             }
 
