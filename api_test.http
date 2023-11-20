@@ -1,3 +1,8 @@
+GET http://0.0.0.0:8080/metrics
+Authorization: bear: ans_token_xxx
+
+
+###
 GET http://0.0.0.0:8080/primary_name/aleo1sr8d93usu395zc29qcl35ul2e7hl2538hl8pehe4ms88q4g70gxq3ffw0v
 Accept: application/json
 ###

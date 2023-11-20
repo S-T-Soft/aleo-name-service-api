@@ -6,12 +6,14 @@ use serde_json;
 use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
+use actix_web_prom::PrometheusMetricsBuilder;
 use models::*;
 
 mod utils;
 mod client;
 mod db;
 mod models;
+mod auth;
 
 #[derive(Deserialize)]
 struct GetResolverParams {
@@ -230,6 +232,7 @@ async fn main() -> std::io::Result<()> {
     // let redis_cfg = Config::from_url(redis_url);
     // let redis_pool = redis_cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
 
+    // db config
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
     let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
     let mgr_config =deadpool_postgres::ManagerConfig {
@@ -238,6 +241,12 @@ async fn main() -> std::io::Result<()> {
     let db_mgr = deadpool_postgres::Manager::from_config(db_config, NoTls, mgr_config);
     let db_pool = deadpool_postgres::Pool::builder(db_mgr).max_size(24).build().unwrap();
 
+    // prometheus config
+    let prometheus = PrometheusMetricsBuilder::new("api")
+        .endpoint("/metrics")
+        .build()
+        .unwrap();
+
     println!("start server listening in 0.0.0.0:8080");
     HttpServer::new(move || {
         App::new()
@@ -245,6 +254,8 @@ async fn main() -> std::io::Result<()> {
                 Cors::permissive()
                     .allow_any_origin()
             )
+            .wrap(prometheus.clone())
+            .wrap(auth::Authentication)
             // .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)
