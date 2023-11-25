@@ -247,7 +247,7 @@ async fn main() -> std::io::Result<()> {
         .build()
         .unwrap();
 
-    println!("start server listening in 0.0.0.0:8080");
+    println!("start server listening in 0.0.0.0:9007");
     HttpServer::new(move || {
         App::new()
             .wrap(
@@ -271,7 +271,7 @@ async fn main() -> std::io::Result<()> {
 
             
     })
-    .bind("0.0.0.0:8080")?
+    .bind("0.0.0.0:9007")?
     .run()
     .await
 }
