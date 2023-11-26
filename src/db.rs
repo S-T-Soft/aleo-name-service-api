@@ -105,7 +105,7 @@ pub async fn get_resolver(pool: &Pool, name_hash: &str, category: &str) -> Resul
 
     let query = "select ar.id, ar.category, ar.version, ar.name from ans2.ans_resolver As ar
         LEFT JOIN ans2.ans_name_version as av ON ar.name_hash = av.name_hash
-        WHERE ar.version=av.version and ar.name_hash = $1 and ar.category = $2 limit 1";
+        WHERE (ar.version=av.version or av.version is null) and ar.name_hash = $1 and ar.category = $2 limit 1";
     println!("get_resolvers_by_namehash query db: {} name_hash {}, category {}", &query, &name_hash, &category);
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[&name_hash, &category]).await?;
