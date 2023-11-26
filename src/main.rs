@@ -7,6 +7,10 @@ use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
 use actix_web_prom::PrometheusMetricsBuilder;
+use base64::encode;
+use reqwest::header::HeaderValue;
+use reqwest::StatusCode;
+
 use models::*;
 
 mod utils;
@@ -91,9 +95,9 @@ async fn resolver(db_pool: web::Data<deadpool_postgres::Pool>, resolver_params: 
         }
     };
 
-    let nft = db::get_resolver(&db_pool, &name_hash, &category).await;
+    let resolver_result = db::get_resolver(&db_pool, &name_hash, &category).await;
 
-    match nft {
+    match resolver_result {
         Ok(nft) => HttpResponse::Ok().json(ResolverContent {
                 name_hash: nft.name_hash,
                 category: nft.category,
@@ -176,6 +180,26 @@ async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::
 
     match nft.await {
         Ok(nft) => {
+            let avatar_url = match db::get_resolver(&db_pool, &name_hash, "avatar").await {
+                Ok(r) => format!("https://ipfs.io/ipfs/{}", r.content.replace("ipfs://", "")),
+                Err(_e) => "".to_string()
+            };
+            let mut fill_bg = "paint0_linear";
+            let mut fill_bg_base64 = "".to_string();
+            if !avatar_url.is_empty() {
+                println!("image url: {}", &avatar_url);
+                let response = reqwest::get(&avatar_url).await.unwrap();
+                if response.status() == StatusCode::OK {
+                    let resp_headers = response.headers().clone();
+                    let base64_image = encode(&response.bytes().await.unwrap().to_vec());
+                    let image_type = resp_headers.get("Content-Type").unwrap();
+                    fill_bg_base64 = format!("data:{};base64,{}", image_type.to_str().unwrap(), base64_image);
+                    fill_bg = "bg-image";
+                } else {
+                    // 请求失败，处理错误情况
+                }
+            }
+
             let svg_content = include_str!("./file/demo.svg");
             let name_parts = utils::split_string(&nft.name);
             let mut name_texts = Vec::new();
@@ -188,11 +212,11 @@ async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::
                 name_texts.push(name_text);
             }
 
-            let fill_bg = "paint0_linear";
+
 
             HttpResponse::Ok()
                 .content_type("image/svg+xml")
-                .body(svg_content.replace("{fill_bg}", &fill_bg).replace("{aleonameservice}", &name_texts.join("")))
+                .body(svg_content.replace("{fill_bg}", &fill_bg).replace("{aleonameservice}", &name_texts.join("")).replace("{fill_bg_base64}", &fill_bg_base64))
         },
         Err(_e) => HttpResponse::NotFound().finish(),
     }
