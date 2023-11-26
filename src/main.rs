@@ -6,9 +6,7 @@ use serde_json;
 use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
-use std::io::Write;
 use actix_web_prom::PrometheusMetricsBuilder;
-use futures_util::TryStreamExt;
 use models::*;
 
 mod utils;
@@ -96,7 +94,13 @@ async fn resolver(db_pool: web::Data<deadpool_postgres::Pool>, resolver_params: 
     let nft = db::get_resolver(&db_pool, &name_hash, &category).await;
 
     match nft {
-        Ok(nft) => HttpResponse::Ok().json(nft),
+        Ok(nft) => HttpResponse::Ok().json(ResolverContent {
+                name_hash: nft.name_hash,
+                category: nft.category,
+                version: nft.version,
+                content: nft.content,
+                name
+            }),
         Err(_e) => HttpResponse::NotFound().finish(),
     }
 }
@@ -128,7 +132,11 @@ async fn resolvers(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Path<
     let name_resolvers = db::get_resolvers_by_namehash(&db_pool, &name_hash).await;
 
     match name_resolvers {
-        Ok(data) => HttpResponse::Ok().json(data),
+        Ok(data) => HttpResponse::Ok().json(data.into_iter().map(|nft| ResolverContent{
+            name_hash: nft.name_hash,
+            category: nft.category,
+            version: nft.version,
+            content: nft.content, name: name.clone()}).collect::<Vec<_>>()),
         Err(_e) => HttpResponse::NotFound().finish(),
     }
 }

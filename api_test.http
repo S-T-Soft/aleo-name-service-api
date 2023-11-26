@@ -10,7 +10,7 @@ GET http://0.0.0.0:8080/resolver/wayne
 Accept: application/json
 
 ###
-GET http://0.0.0.0:9007/resolver/snowtiger.ans
+GET http://0.0.0.0:9007/resolvers/snowtiger.ans
 Accept: application/json
 
 ###

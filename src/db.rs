@@ -91,7 +91,7 @@ pub async fn get_resolvers_by_namehash(pool: &Pool, name_hash: &str) -> Result<V
         let r = Resolver {
             name_hash: name_hash.to_string(),
             category: row.get(1),
-            name: row.get(3),
+            content: row.get(3),
             version: row.get(2),
         };
         resolver_list.push(r);
@@ -113,7 +113,7 @@ pub async fn get_resolver(pool: &Pool, name_hash: &str, category: &str) -> Resul
     let resolver = Resolver {
         name_hash: name_hash.to_string(),
         category: row.get(1),
-        name: row.get(3),
+        content: row.get(3),
         version: row.get(2),
     };
 

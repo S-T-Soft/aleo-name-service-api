@@ -14,10 +14,20 @@ pub struct NameHash {
 }
 
 #[derive(Serialize)]
-pub struct ResolverContent {
+pub struct Resolver {
+    pub name_hash: String,
     pub category: String,
-    pub name: String,
     pub content: String,
+    pub version: i32
+}
+
+#[derive(Serialize)]
+pub struct ResolverContent {
+    pub name_hash: String,
+    pub category: String,
+    pub version: i32,
+    pub content: String,
+    pub name: String,
 }
 
 #[derive(Serialize)]
@@ -63,10 +73,3 @@ pub struct NFTWithPrimary {
     pub resolver: String,
 }
 
-#[derive(Serialize)]
-pub struct Resolver {
-    pub name_hash: String,
-    pub category: String,
-    pub name: String,
-    pub version: i32
-}
