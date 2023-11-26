@@ -26,7 +26,7 @@ GET http://0.0.0.0:8080/address/wayne.ans
 Accept: application/json
 
 ###
-GET http://0.0.0.0:9007/resolver?name=snowtiger.ans&category=avatar
+GET http://34.66.178.61:9007/resolver?name=snowtiger.ans&category=avatar
 Accept: application/json
 
 ###
