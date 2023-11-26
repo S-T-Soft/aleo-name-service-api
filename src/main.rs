@@ -113,7 +113,7 @@ async fn public_ans(db_pool: web::Data<deadpool_postgres::Pool>, address: web::P
     }
 }
 
-#[get("/resolver/{name}")]
+#[get("/resolvers/{name}")]
 async fn resolvers(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Path<String>) -> impl Responder {
     let name = name.into_inner();
 
