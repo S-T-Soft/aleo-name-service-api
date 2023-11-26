@@ -26,7 +26,7 @@ GET http://0.0.0.0:8080/address/wayne.ans
 Accept: application/json
 
 ###
-GET http://34.66.178.61:9007/resolver?name=snowtiger.ans&category=avatar
+GET http://0.0.0.0:9007/resolver?name=snowtiger.ans&category=avatar
 Accept: application/json
 
 ###
@@ -59,7 +59,7 @@ Accept: application/json
 
 
 ### 一行name img
-GET http://0.0.0.0:8080/token/4039165989542226292217059306495671259264448213602066982803038338315267964460field.svg
+GET http://0.0.0.0:9007/token/4039165989542226292217059306495671259264448213602066982803038338315267964460field.svg
 Accept: application/json
 
 

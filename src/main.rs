@@ -6,7 +6,9 @@ use serde_json;
 use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
+use std::io::Write;
 use actix_web_prom::PrometheusMetricsBuilder;
+use futures_util::TryStreamExt;
 use models::*;
 
 mod utils;
@@ -94,7 +96,7 @@ async fn resolver(db_pool: web::Data<deadpool_postgres::Pool>, resolver_params: 
     let nft = db::get_resolver(&db_pool, &name_hash, &category).await;
 
     match nft {
-        Ok(nft) => HttpResponse::Ok().json(ResolverContent { content: nft.name, name: name.clone() , category: nft.category}),
+        Ok(nft) => HttpResponse::Ok().json(nft),
         Err(_e) => HttpResponse::NotFound().finish(),
     }
 }
@@ -178,9 +180,11 @@ async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::
                 name_texts.push(name_text);
             }
 
+            let fill_bg = "paint0_linear";
+
             HttpResponse::Ok()
                 .content_type("image/svg+xml")
-                .body(svg_content.replace("{aleonameservice}", &name_texts.join("")))
+                .body(svg_content.replace("{fill_bg}", &fill_bg).replace("{aleonameservice}", &name_texts.join("")))
         },
         Err(_e) => HttpResponse::NotFound().finish(),
     }
