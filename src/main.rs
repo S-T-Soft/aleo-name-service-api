@@ -8,7 +8,6 @@ use tokio_postgres::NoTls;
 use std::env;
 use actix_web_prom::PrometheusMetricsBuilder;
 use base64::encode;
-use reqwest::header::HeaderValue;
 use reqwest::StatusCode;
 
 use models::*;
