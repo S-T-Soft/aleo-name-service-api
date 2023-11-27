@@ -17,6 +17,7 @@ Accept: application/json
 GET http://34.66.178.61:9007/address/snowtiger.ans
 Accept: application/json
 
+
 ###
 GET http://0.0.0.0:9007/address/killboy.ans
 Accept: application/json
@@ -64,7 +65,13 @@ Accept: application/json
 
 
 
+###
+GET http://34.66.178.61:9007/address/snowtiger.ans
+Accept: application/json
 
+
+###
+GET http://testnet-api.aleonames.id:9007/public_ans/aleo1sr8d93usu395zc29qcl35ul2e7hl2538hl8pehe4ms88q4g70gxq3ffw0v
 
 
 
