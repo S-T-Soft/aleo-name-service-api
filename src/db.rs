@@ -2,7 +2,7 @@ use actix_web::web::Data;
 use deadpool_postgres::Pool;
 use tokio_postgres::Error;
 use crate::models::*;
-
+use crate::utils;
 pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWithPrimary, Error> {
     let client = pool.get().await.unwrap();
     let query = "select an.id, an.name_hash, an.full_name, an.resolver, ap.id from ans3.ans_name AS an
@@ -179,4 +179,34 @@ pub async fn get_address_by_hash(pool: &Data<Pool>, name_hash: &String) -> Resul
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[&name_hash]).await?;
     Ok(row.get(1))
+}
+
+pub(crate) async fn get_statistic_data(pool: &Data<Pool>) -> Result<AnsStatistic, Error>{
+    let client = pool.get().await.unwrap();
+    let cur_time = utils::get_current_timestamp();
+    let time_24_before:i64 = (cur_time - 24 * 3600) as i64;
+
+    let query = "SELECT COUNT(*) AS total_count,
+        COUNT(CASE WHEN ab.timestamp > $1 THEN 1 END) AS count_gt_time
+        FROM ans3.ans_name an left JOIN ans3.block ab ON an.block_height = ab.height";
+    let query = client.prepare(&query).await.unwrap();
+    let row = client.query_one(&query, &[&time_24_before]).await?;
+    let total_names = row.get(0);
+    let total_names_24h = row.get(1);
+
+    let query2 = "SELECT COUNT(*) AS total_count, COUNT(distinct address) AS address_count
+        FROM ans3.ans_nft_owner";
+    let query2 = client.prepare(&query2).await.unwrap();
+    let row2 = client.query_one(&query2, &[]).await?;
+    let total_nft:i64 = row2.get(0);
+    let total_owner = row2.get(1);
+
+    let st= AnsStatistic {
+        cal_time: cur_time,
+        total_names,
+        total_names_24h,
+        total_pri_names: total_names - total_nft,
+        total_nft_owners: total_owner
+    };
+    Ok(st)
 }

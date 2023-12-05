@@ -53,6 +53,17 @@ This API endpoint accepts a path parameter `name` and returns List ResolverConte
 ### 8. `GET /api/v1/token/{name_hash}`
 ### 9. `GET /api/v1/token/{name_hash}.png`
 
+### 10. `GET /api/v1/statistic`
+```json
+{
+  "cal_time": 1701796297,
+  "total_names_24h": 163,
+  "total_names": 2226,
+  "total_pri_names": 1298,
+  "total_nft_owners": 888
+}
+```
+
 ## Running the server
 
 To start the server in local, run the following command:

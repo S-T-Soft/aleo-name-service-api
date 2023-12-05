@@ -211,8 +211,6 @@ async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::
                 name_texts.push(name_text);
             }
 
-
-
             HttpResponse::Ok()
                 .content_type("image/svg+xml")
                 .body(svg_content.replace("{fill_bg}", &fill_bg).replace("{aleonameservice}", &name_texts.join("")).replace("{fill_bg_base64}", &fill_bg_base64))
@@ -259,7 +257,17 @@ async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path
     }
 }
 
-
+#[get("/statistic")]
+async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>) -> impl Responder {
+    let statistic_data = db::get_statistic_data(&db_pool).await;
+    match statistic_data {
+        Ok(data) => HttpResponse::Ok().json(data),
+        Err(_e) => {
+            eprintln!("aaaa {}", _e);
+            HttpResponse::NotFound().finish()
+        },
+    }
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -303,6 +311,7 @@ async fn main() -> std::io::Result<()> {
             .service(subdomains)
             .service(token_png)
             .service(token)
+            .service(statistic)
 
             
     })

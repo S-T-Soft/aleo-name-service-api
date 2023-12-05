@@ -1,3 +1,4 @@
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::cmp::min;
 use snarkvm_console_program::{Field, Value};
 use snarkvm_console_network::prelude::Zero;
@@ -112,4 +113,11 @@ pub fn split_string(input: &str) -> Vec<&str> {
         result.push(&input[i..i + min(15, input.len() - i )]);
     }
     result
+}
+
+pub fn get_current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Failed to get current timestamp")
+        .as_secs()
 }

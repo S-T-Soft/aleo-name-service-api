@@ -54,7 +54,14 @@ pub struct AnsTokenAttr {
     pub value: String,
 }
 
-
+#[derive(Serialize)]
+pub struct AnsStatistic {
+    pub cal_time: u64,
+    pub total_names_24h: i64,
+    pub total_names: i64,
+    pub total_pri_names: i64,
+    pub total_nft_owners: i64
+}
 
 // db
 #[derive(Serialize)]
