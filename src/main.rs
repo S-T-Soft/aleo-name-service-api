@@ -2,12 +2,13 @@ use actix_web::{App, get, HttpResponse, HttpServer, Responder, web};
 use actix_cors::Cors;
 use serde::Deserialize;
 use serde_json;
-// use deadpool_redis::{Config, Runtime, Pool};
+use deadpool_redis::{Config as RedisConfig, Runtime as RedisRuntime};
 use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
 use actix_web_prom::PrometheusMetricsBuilder;
 use base64::encode;
+use deadpool_redis::redis::cmd;
 use reqwest::StatusCode;
 
 use models::*;
@@ -258,12 +259,42 @@ async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path
 }
 
 #[get("/statistic")]
-async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>) -> impl Responder {
+async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: web::Data<deadpool_redis::Pool>) -> impl Responder {
+
+    let mut conn = redis_pool.get().await.unwrap();
+    let cached_value: Option<String> = match cmd("GET").arg(&["cache:statistic"]).query_async(&mut conn).await {
+        Ok(value) => value,
+        Err(_) => None
+    };
+    if let Some(value) = cached_value {
+        let cached_data: AnsStatistic = serde_json::from_str(&value).expect("failed get cached data");
+        return HttpResponse::Ok().json(cached_data);
+    }
+
     let statistic_data = db::get_statistic_data(&db_pool).await;
     match statistic_data {
-        Ok(data) => HttpResponse::Ok().json(data),
-        Err(_e) => {
-            eprintln!("aaaa {}", _e);
+        Ok(data) => {
+            let key = "cache:statistic";
+            let data_json = serde_json::to_string(&data).expect("Failed get statistic json");
+            let _: () = cmd("SET")
+                .arg(key)
+                .arg(data_json)
+                .query_async(&mut conn)
+                .await
+                .expect("Failed to set key-value");
+
+            // 设置过期时间
+            let _: () = cmd("EXPIRE")
+                .arg(key)
+                .arg(10)
+                .query_async(&mut conn)
+                .await
+                .expect("Failed to set expiration time");
+
+            HttpResponse::Ok().json(data)
+        }
+        Err(e) => {
+            eprintln!("statistic fail: {}", e);
             HttpResponse::NotFound().finish()
         },
     }
@@ -271,9 +302,9 @@ async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>) -> impl Responde
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
-    // let redis_cfg = Config::from_url(redis_url);
-    // let redis_pool = redis_cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
+    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
+    let redis_cfg = RedisConfig::from_url(redis_url);
+    let redis_pool = redis_cfg.create_pool(Some(RedisRuntime::Tokio1)).unwrap();
 
     // db config
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
@@ -299,7 +330,7 @@ async fn main() -> std::io::Result<()> {
             )
             .wrap(prometheus.clone())
             .wrap(auth::Authentication)
-            // .app_data(web::Data::new(redis_pool.clone()))
+            .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)
             .service(hash_to_name)

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // resp
 #[derive(Serialize)]
@@ -54,7 +54,7 @@ pub struct AnsTokenAttr {
     pub value: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AnsStatistic {
     pub cal_time: u64,
     pub total_names_24h: i64,
