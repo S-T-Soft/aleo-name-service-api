@@ -423,7 +423,7 @@ async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, b
 
         let version = 0;
         db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
         db_trans.execute("DELETE from ansi.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
@@ -455,13 +455,13 @@ async fn transfer_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Blo
 
 
         db_trans.execute("INSERT INTO ansi.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &receiver, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         let version = 0;
         db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
         db_trans.execute("DELETE from ansi.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
@@ -485,7 +485,7 @@ async fn set_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
         let owner: String = parse_address(owner_arg).unwrap();
 
         db_trans.execute("INSERT INTO ansi.ans_primary_name (name_hash, address, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (address) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
@@ -560,7 +560,7 @@ async fn set_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: 
         }
 
         db_trans.execute("INSERT INTO ansi.ans_resolver (name_hash, category, version, name, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5, $6, $7) ON CONFLICT (name_hash, category, version) DO SET name=%4, block_height=$5, transaction_id=$6, transition_id=$7",
+                                    VALUES ($1, $2,$3, $4, $5, $6, $7) ON CONFLICT (name_hash, category, version) DO UPDATE SET name=$4, block_height=$5, transaction_id=$6, transition_id=$7",
                          &[&name_hash, &category, &version, &content, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
@@ -615,7 +615,7 @@ async fn clear_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
 
         let version = 1;
         db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
