@@ -18,6 +18,7 @@ mod client;
 mod db;
 mod models;
 mod auth;
+mod indexer;
 
 #[derive(Deserialize)]
 struct GetResolverParams {
@@ -320,6 +321,10 @@ async fn main() -> std::io::Result<()> {
         .endpoint("/metrics")
         .build()
         .unwrap();
+
+    tokio::spawn(async {
+        indexer::sync_data().await;
+    });
 
     println!("start server listening in 0.0.0.0:8080");
     HttpServer::new(move || {
