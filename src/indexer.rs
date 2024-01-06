@@ -95,7 +95,7 @@ pub async fn sync_data() {
             match reqwest::get(&url).await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<Block<N>>().await {
-                        index_data(data).await;
+                        index_data(&data);
                     }
                 },
                 Err(e) => eprintln!("Error fetching data: {}", e),
@@ -137,7 +137,7 @@ async fn sync_from_cdn() -> Result<(), Box<dyn Error>> {
             println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
 
             // index data in block.
-            let _ = index_data(block);
+            let _ = index_data(&block);
 
             Ok(())
         },
@@ -168,7 +168,7 @@ async fn get_next_block_number() -> Result<i64, Box<dyn Error>> {
     Ok(height)
 }
 
-async fn index_data(block: Block<N>) {
+fn index_data(block: &Block<N>) {
     println!("Process block {} on {}", block.height(), block.timestamp());
     for transaction in block.transactions().clone().into_iter() {
         if transaction.is_accepted() {
