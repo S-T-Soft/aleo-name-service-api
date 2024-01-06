@@ -2,6 +2,8 @@
 
 use std::error::Error;
 use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use futures::stream::{self, StreamExt};
 use lazy_static::lazy_static;
 use tokio::time::sleep;
 use snarkvm_console_network::{FromBits, Testnet3, ToBits};
@@ -95,7 +97,7 @@ pub async fn sync_data() {
             match reqwest::get(&url).await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<Block<N>>().await {
-                        index_data(&data);
+                        index_data(&data).await;
                     }
                 },
                 Err(e) => eprintln!("Error fetching data: {}", e),
@@ -120,6 +122,9 @@ async fn sync_from_cdn() -> Result<(), Box<dyn Error>> {
     let cdn_request_start = start.saturating_sub(start % MAX_BLOCK_RANGE);
     let cdn_request_end = end.saturating_sub(end % MAX_BLOCK_RANGE);
 
+    let mut blocks_to_process = Arc::new(Mutex::new(Vec::new()));
+    let blocks_to_process_clone = blocks_to_process.clone();
+
     // Scan the blocks via the CDN.
     let _ = snarkos_node_cdn::load_blocks(
         &CDN_ENDPOINT,
@@ -127,21 +132,24 @@ async fn sync_from_cdn() -> Result<(), Box<dyn Error>> {
         Some(cdn_request_end),
         move |block| {
             // Check if the block is within the requested range.
-            if block.height() < start || block.height() > end {
-                return Ok(());
+            if block.height() >= start && block.height() <= end {
+                let mut blocks = blocks_to_process_clone.lock().unwrap();
+                blocks.push(block);
             }
-
-            // Log the progress.
-            let percentage_complete =
-                block.height().saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
-            println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
-
-            // index data in block.
-            let _ = index_data(&block);
 
             Ok(())
         },
     ).await;
+
+    let blocks = blocks_to_process.lock().unwrap().clone();
+    let mut block_stream = stream::iter(blocks);
+    while let Some(block) = block_stream.next().await {
+        let percentage_complete =
+            block.height().saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
+        println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
+
+        index_data(&block).await;
+    }
 
     Ok(())
 }
@@ -168,7 +176,7 @@ async fn get_next_block_number() -> Result<i64, Box<dyn Error>> {
     Ok(height)
 }
 
-fn index_data(block: &Block<N>) {
+async fn index_data(block: &Block<N>) {
     println!("Process block {} on {}", block.height(), block.timestamp());
     for transaction in block.transactions().clone().into_iter() {
         if transaction.is_accepted() {

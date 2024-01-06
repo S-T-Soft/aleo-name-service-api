@@ -352,6 +352,7 @@ dependencies = [
  "base64 0.13.1",
  "deadpool-postgres",
  "deadpool-redis",
+ "futures",
  "futures-util",
  "lazy_static",
  "once_cell",
