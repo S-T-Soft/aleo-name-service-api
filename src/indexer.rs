@@ -1,5 +1,6 @@
 // indexer.rs
 
+use std::env;
 use std::error::Error;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
@@ -9,13 +10,15 @@ use tokio::time::sleep;
 use snarkvm_console_network::{FromBits, Testnet3, ToBits};
 use snarkvm_ledger_block::{Block, Transaction};
 use reqwest;
-use snarkvm_console_program::{Field, Identifier, FromField};
+use snarkvm_console_network::prelude::ToBytes;
+use snarkvm_console_program::{Field, Address, Identifier, FromField, Argument, FromBytes};
 use snarkvm_ledger_block::{Transition};
-use tokio::io::{AsyncWriteExt, stdout};
+use tokio_postgres::{Client, NoTls};
 
 type N = Testnet3;
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet3.blocks/phase3";
+const ANS_BLOCK_HEIGHT_START: i64 = 649183;
 
 lazy_static! {
     static ref PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"aleo_name_service_registry_v3".as_bytes().to_bits_le())
@@ -81,9 +84,11 @@ lazy_static! {
 }
 
 pub async fn sync_data() {
-    let _ = sync_from_cdn().await;
+    let latest_height = get_latest_height().await.unwrap();
+    let _ = sync_from_cdn(latest_height).await;
+
     loop {
-        let block_number = match get_next_block_number().await {
+        let block_number = match get_next_block_number(latest_height).await {
             Ok(number) => number,
             Err(e) => {
                 eprintln!("Error fetching next block number: {}", e);
@@ -111,10 +116,17 @@ pub async fn sync_data() {
 }
 
 
-async fn sync_from_cdn() -> Result<(), Box<dyn Error>> {
+async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
+    let block_number = match get_next_block_number(init_latest_height).await {
+        Ok(number) => number,
+        Err(e) => {
+            return Ok(());
+        }
+    };
+
     // local block height
-    let start = 0u32;
-    let end = get_latest_height().await?;
+    let start = block_number as u32;
+    let end = init_latest_height;
     let total_blocks = end.saturating_sub(start);
 
     println!("Sync {total_blocks} blocks from CDN (0% complete)...");
@@ -156,28 +168,66 @@ async fn sync_from_cdn() -> Result<(), Box<dyn Error>> {
 
 async fn get_latest_height() -> Result<u32, Box<dyn Error>> {
     let url = "https://api.explorer.aleo.org/v1/testnet3/block/height/latest";
+    loop {
+        match reqwest::get(url).await {
+            Ok(response) => {
+                let body = response.text().await?;
+                return Ok(body.parse::<u32>()?);
+            }
+            Err(err) => {
+                eprintln!("Error: {}", err);
+                sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 
-    let response = reqwest::get(url).await?;
-
-    let body = response.text().await?;
-
-    Ok(body.parse::<u32>()?)
 }
 
-async fn get_next_block_number() -> Result<i64, Box<dyn Error>> {
-    let latest_height = get_latest_height().await?;
+async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn Error>> {
+    let mut local_latest_height = ANS_BLOCK_HEIGHT_START;
+    let db_client = connect().await.unwrap();
+    let query = "select height from ansi.block order by height desc limit 1";
+    let query = db_client.prepare(&query).await.unwrap();
+    let rows = db_client.query(&query, &[]).await?;
+    if !rows.is_empty() {
+        local_latest_height = rows.get(0).unwrap().get(0);
+    }
+
+    let mut latest_height= init_latest_height;
+    if local_latest_height >= init_latest_height as i64 {
+        latest_height = get_latest_height().await?;
+    }
+
     println!("Latest height: {}", latest_height);
-    let local_latest_height = 1096997;
-    let height = if latest_height > local_latest_height {
-        local_latest_height as i64 + 1
+
+    let height = if latest_height as i64 > local_latest_height {
+        local_latest_height + 1
     } else {
         -1
     };
     Ok(height)
 }
 
+async fn connect() -> Result<Client, tokio_postgres::Error> {
+    let conn_str = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
+    let (client, connection) = tokio_postgres::connect(&conn_str, NoTls).await?;
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection db err: {}", e)
+        }
+    });
+
+    Ok(client)
+}
+
 async fn index_data(block: &Block<N>) {
     println!("Process block {} on {}", block.height(), block.timestamp());
+    let mut db_client = connect().await.unwrap();
+    let db_trans = db_client.transaction().await.unwrap();
+
+    db_trans.execute("INSERT INTO ansi.block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
+                     &[&(block.height() as i64), &block.hash().to_string(), &block.previous_hash().to_string(), &block.timestamp()]).await.unwrap();
+
     for transaction in block.transactions().clone().into_iter() {
         if transaction.is_accepted() {
             for transition in transaction.transitions() {
@@ -185,93 +235,409 @@ async fn index_data(block: &Block<N>) {
                     println!("> process transition {}, function name: {}",
                              transition.id(), transition.function_name());
                     match transition.function_name() {
-                        name if name == &*REGISTER => register(&block, &transaction, transition),
-                        name if name == &*REGISTER_TLD => register(&block, &transaction, transition),
-                        name if name == &*REGISTER_PRIVATE => register(&block, &transaction, transition),
-                        name if name == &*REGISTER_PUBLIC => register(&block, &transaction, transition),
-                        name if name == &*CONVERT_PRIVATE_TO_PUBLIC => convert_private_to_public(&block, &transaction, transition),
-                        name if name == &*CONVERT_PUBLIC_TO_PRIVATE => convert_public_to_private(&block, &transaction, transition),
-                        name if name == &*TRANSFER_PUBLIC => transfer_public(&block, &transaction, transition),
-                        name if name == &*SET_PRIMARY_NAME => set_primary_name(&block, &transaction, transition),
-                        name if name == &*UNSET_PRIMARY_NAME => unset_primary_name(&block, &transaction, transition),
-                        name if name == &*SET_RESOLVER => set_resolver(&block, &transaction, transition),
-                        name if name == &*SET_RESOLVER_RECORD => set_resolver_record(&block, &transaction, transition),
-                        name if name == &*UNSET_RESOLVER_RECORD => unset_resolver_record(&block, &transaction, transition),
-                        name if name == &*CLEAR_RESOLVER_RECORD => clear_resolver_record(&block, &transaction, transition),
-                        name if name == &*BURN => burn(&block, &transaction, transition),
+                        name if name == &*REGISTER => register(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*REGISTER_TLD => register_tld(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*REGISTER_PRIVATE => register(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*REGISTER_PUBLIC => register(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*CONVERT_PRIVATE_TO_PUBLIC => convert_private_to_public(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*CONVERT_PUBLIC_TO_PRIVATE => convert_public_to_private(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*TRANSFER_PUBLIC => transfer_public(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*SET_RESOLVER => set_resolver(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*CLEAR_RESOLVER_RECORD => clear_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*BURN => burn(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
             }
         }
     }
+
+    db_trans.commit().await.unwrap()
 }
 
 /**
 process all register transition
 **/
-fn register(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
+async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let name_hash_arg = args.get(0).unwrap();
+        let name_arg = args.get(1).unwrap();
+        let parent_arg = args.get(2).unwrap();
+        let resolver_arg = args.get(3).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let name = parse_u128x4(name_arg).unwrap();
+        let parent: String = parse_field(parent_arg).unwrap();
+        let resolver = parse_u128(resolver_arg).unwrap();
+        let mut full_name = name.clone();
+
+        let query = "SELECT full_name FROM ansi.ans_name WHERE name_hash=$1 limit 1";
+        let query = db_trans.prepare(&query).await.unwrap();
+        let rows = db_trans.query(&query, &[&parent]).await.unwrap();
+        if !rows.is_empty() {
+            let parent_full_name = rows.get(0).unwrap().get(0);
+            full_name = name.clone() + &".".to_string() + parent_full_name;
+        }
+
+        db_trans.execute("INSERT INTO ansi.ans_name (name_hash, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        println!(">> register: {} {} {} {} {}", name, parent, name_hash, full_name, resolver)
+    } else {
+        println!(">> register: Error")
+    };
+
+}
+
+async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let hash_caller_arg = args.get(0).unwrap();
+        let registrar_arg = args.get(1).unwrap();
+        let name_hash_arg = args.get(2).unwrap();
+        let name_arg = args.get(3).unwrap();
+
+        let registrar: String = parse_address(registrar_arg).unwrap();
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let name = parse_u128x4(name_arg).unwrap();
+
+        db_trans.execute("INSERT INTO ansi.ans_name (name_hash, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &name, &"0field".to_string(), &"".to_string(), &name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+        db_trans.execute("INSERT INTO ansi.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &registrar, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        println!(">> register_tld {} {} {}", name_hash, name, registrar)
+    } else {
+        println!(">> register_tld: Error")
+    };
+
+}
+
+fn parse_u128x4(name_arg: &Argument<N>) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 64] = [0; 64];
+
+    name[0..16].copy_from_slice(&name_bytes[11..27]);
+    name[16..32].copy_from_slice(&name_bytes[32..48]);
+    name[32..48].copy_from_slice(&name_bytes[53..69]);
+    name[48..64].copy_from_slice(&name_bytes[74..90]);
+
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
+}
+
+fn parse_u128x8(name_arg: &Argument<N>) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 128] = [0; 128];
+
+    name[0..16].copy_from_slice(&name_bytes[11..27]);
+    name[16..32].copy_from_slice(&name_bytes[32..48]);
+    name[32..48].copy_from_slice(&name_bytes[53..69]);
+    name[48..64].copy_from_slice(&name_bytes[74..90]);
+    name[64..80].copy_from_slice(&name_bytes[95..111]);
+    name[80..96].copy_from_slice(&name_bytes[116..132]);
+    name[96..112].copy_from_slice(&name_bytes[137..153]);
+    name[112..128].copy_from_slice(&name_bytes[158..174]);
+
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
+}
+
+fn parse_u128(name_arg: &Argument<N>) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 16] = [0; 16];
+
+    name[0..16].copy_from_slice(&name_bytes[4..20]);
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
+}
+
+fn parse_field(field_arg: &Argument<N>) -> Result<String, String> {
+    let field_arg_bytes = Argument::to_bytes_le(field_arg).unwrap();
+
+    if field_arg_bytes.len() >= 32 {
+        let last_32: &[u8] = &field_arg_bytes[field_arg_bytes.len() - 32..];
+        Ok(format!("{}", Field::<N>::from_bytes_le(last_32).unwrap()))
+    } else {
+        Err("e".to_string())
     }
 }
 
-fn convert_private_to_public(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
+fn parse_address(address_arg: &Argument<N>) -> Result<String, String> {
+    let address_arg_bytes = Argument::to_bytes_le(address_arg).unwrap();
+
+    if address_arg_bytes.len() >= 32 {
+        let last_32: &[u8] = &address_arg_bytes[address_arg_bytes.len() - 32..];
+        Ok(format!("{}", Address::<N>::from_bytes_le(last_32).unwrap()))
+    } else {
+        Err("e".to_string())
     }
 }
 
-fn convert_public_to_private(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn convert_private_to_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let owner_arg = args.get(0).unwrap();
+        let name_hash_arg = args.get(1).unwrap();
+
+        let owner: String = parse_address(owner_arg).unwrap();
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+
+        db_trans.execute("INSERT INTO ansi.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        println!(">> convert_private_to_public {} {}", name_hash, owner)
+    } else {
+        println!(">> convert_private_to_public: Error")
+    };
 }
 
-fn transfer_public(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let owner_arg = args.get(0).unwrap();
+        let name_hash_arg = args.get(1).unwrap();
+
+        let owner: String = parse_address(owner_arg).unwrap();
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+
+        db_trans.execute("DELETE from ansi.ans_nft_owner WHERE name_hash=$1", &[&name_hash]).await.unwrap();
+
+        let version = 0;
+        db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+        db_trans.execute("DELETE from ansi.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+
+        println!(">> convert_public_to_private {} {}", name_hash, owner)
+    } else {
+        println!(">> convert_public_to_private: Error")
+    };
 }
 
-fn set_primary_name(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn transfer_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let receiver_arg = args.get(0).unwrap();
+        let name_hash_arg = args.get(1).unwrap();
+        let caller_arg = args.get(2).unwrap();
+
+        let receiver: String = parse_address(receiver_arg).unwrap();
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let caller: String = parse_address(caller_arg).unwrap();
+
+        let query = "SELECT address FROM ansi.ans_nft_owner WHERE name_hash=$1 limit 1";
+        let query = db_trans.prepare(&query).await.unwrap();
+        let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
+
+        let owner:String = rows.get(0).unwrap().get(0);
+
+
+        db_trans.execute("INSERT INTO ansi.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
+                         &[&name_hash, &receiver, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        let version = 0;
+        db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+        db_trans.execute("DELETE from ansi.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+
+        println!(">> transfer_public {} {} caller {}", name_hash, owner, caller)
+    } else {
+        println!(">> transfer_public: Error")
+    };
 }
 
-fn unset_primary_name(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn set_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+
+        let name_hash_arg = args.get(0).unwrap();
+        let owner_arg = args.get(1).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner: String = parse_address(owner_arg).unwrap();
+
+        db_trans.execute("INSERT INTO ansi.ans_primary_name (name_hash, address, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
+                         &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        println!(">> set_primary_name {} {}", name_hash, owner)
+    } else {
+        println!(">> set_primary_name: Error")
+    };
 }
 
-fn set_resolver(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn unset_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let owner_arg = args.get(0).unwrap();
+
+        let owner: String = parse_address(owner_arg).unwrap();
+
+        db_trans.execute("DELETE from ansi.ans_primary_name WHERE address=$1", &[&owner]).await.unwrap();
+
+        println!(">> unset_primary_name {}", owner)
+    } else {
+        println!(">> unset_primary_name: Error")
+    };
 }
 
-fn set_resolver_record(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn set_resolver(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+
+        let name_hash_arg = args.get(0).unwrap();
+        let owner_arg = args.get(1).unwrap();
+        let resolver_arg = args.get(2).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner: String = parse_address(owner_arg).unwrap();
+        let resolver = parse_u128(resolver_arg).unwrap();
+
+        db_trans.execute("UPDATE ansi.ans_name set resolver=$1  WHERE name_hash=$2 ",
+                         &[&resolver, &name_hash]
+        ).await.unwrap();
+
+        println!(">> set_resolver {} {}", name_hash, owner)
+    } else {
+        println!(">> set_resolver: Error")
+    };
 }
 
-fn unset_resolver_record(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn set_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let name_hash_arg = args.get(0).unwrap();
+        let owner_arg = args.get(1).unwrap();
+        let category_arg = args.get(2).unwrap();
+        let content_arg = args.get(3).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner = parse_address(owner_arg).unwrap();
+        let category: String = parse_u128(category_arg).unwrap();
+        let content = parse_u128x8(content_arg).unwrap();
+
+        let mut version = 1;
+        let query = "SELECT version FROM ansi.ans_name_version WHERE name_hash=$1 limit 1";
+        let query = db_trans.prepare(&query).await.unwrap();
+        let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
+        if !rows.is_empty() {
+            version = rows.get(0).unwrap().get(0);
+        }
+
+        db_trans.execute("INSERT INTO ansi.ans_resolver (name_hash, category, version, name, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5, $6, $7) ON CONFLICT (name_hash, category, version) DO SET name=%4, block_height=$5, transaction_id=$6, transition_id=$7",
+                         &[&name_hash, &category, &version, &content, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        println!(">> set_resolver_record: {} {} {} {} {}", owner, name_hash, category, content, version)
+    } else {
+        println!(">> set_resolver_record: Error")
+    };
+
 }
 
-fn clear_resolver_record(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn unset_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let name_hash_arg = args.get(0).unwrap();
+        let owner_arg = args.get(1).unwrap();
+        let category_arg = args.get(2).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner = parse_address(owner_arg).unwrap();
+        let category: String = parse_u128(category_arg).unwrap();
+
+        let mut version = 1;
+        let query = "SELECT version FROM ansi.ans_name_version WHERE name_hash=$1 limit 1";
+        let query = db_trans.prepare(&query).await.unwrap();
+        let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
+        if !rows.is_empty() {
+            version = rows.get(0).unwrap().get(0);
+        }
+
+        db_trans.execute("DELETE from ansi.ans_resolver where name_hash=$1 and category=$2 and version=$3 ",
+                         &[&name_hash, &category, &version]
+        ).await.unwrap();
+
+        println!(">> unset_resolver_record: {} {} {} {}", owner, name_hash, category, version)
+    } else {
+        println!(">> set_resolver_record: Error")
+    };
 }
 
-fn burn(block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    for output in transition.outputs() {
-        println!(">> output: {}", output)
-    }
+async fn clear_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let name_hash_arg = args.get(0).unwrap();
+        let owner_arg = args.get(1).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner = parse_address(owner_arg).unwrap();
+
+        let version = 1;
+        db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        println!(">> clear_resolver_record: {} {} {}", owner, name_hash, version)
+    } else {
+        println!(">> clear_resolver_record: Error")
+    };
+}
+
+async fn burn(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let name_hash_arg = args.get(0).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+
+        db_trans.execute("DELETE from ansi.ans_name WHERE name_hash=$1", &[&name_hash]).await.unwrap();
+
+        println!(">> burn: {}", name_hash)
+    } else {
+        println!(">> burn: Error")
+    };
 }
