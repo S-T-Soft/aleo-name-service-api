@@ -88,13 +88,10 @@ pub async fn sync_data() {
     let _ = sync_from_cdn(latest_height).await;
 
     loop {
-        let block_number = match get_next_block_number(latest_height).await {
-            Ok(number) => number,
-            Err(e) => {
-                eprintln!("Error fetching next block number: {}", e);
-                -1
-            }
-        };
+        let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
+            eprintln!("Error fetching next block number: {}", e);
+            -1
+        });
 
         if block_number > -1 {
             let url = format!("https://api.explorer.aleo.org/v1/testnet3/block/{}", block_number);
@@ -421,9 +418,9 @@ async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, b
 
         db_trans.execute("DELETE from ansi.ans_nft_owner WHERE name_hash=$1", &[&name_hash]).await.unwrap();
 
-        let version = 0;
+        let version = 2;
         db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ansi.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
         db_trans.execute("DELETE from ansi.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
@@ -459,9 +456,9 @@ async fn transfer_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Blo
                          &[&name_hash, &receiver, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        let version = 0;
+        let version = 2;
         db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ansi.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
         db_trans.execute("DELETE from ansi.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
@@ -615,7 +612,7 @@ async fn clear_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
 
         let version = 1;
         db_trans.execute("INSERT INTO ansi.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ansi.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
