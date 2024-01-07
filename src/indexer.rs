@@ -1,6 +1,6 @@
 // indexer.rs
 
-use std::env;
+use std::{env, fmt};
 use std::error::Error;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,7 @@ use tokio_postgres::{Client, NoTls};
 type N = Testnet3;
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet3.blocks/phase3";
+const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org";
 const ANS_BLOCK_HEIGHT_START: i64 = 649183;
 
 lazy_static! {
@@ -83,23 +84,39 @@ lazy_static! {
         .expect("Failed to create Identifier from Field");
 }
 
+#[derive(Debug)]
+struct IndexError(Box<dyn Error>);
+
+impl fmt::Display for IndexError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "IndexError Error: {}", self.0)
+    }
+}
+
+impl Error for IndexError {}
+
 pub async fn sync_data() {
     let latest_height = get_latest_height().await.unwrap();
-    let _ = sync_from_cdn(latest_height).await;
+    match sync_from_cdn(latest_height).await {
+        Ok(_) => println!("sync from cdn finished!"),
+        _ => {}
+    }
 
     loop {
-        let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
+        let mut db_client = connect_db().await.unwrap();
+        let block_number = get_next_block_number(latest_height, &db_client).await.unwrap_or_else(|e| {
             eprintln!("Error fetching next block number: {}", e);
             -1
         });
 
         if block_number > -1 {
-            let url = format!("https://api.explorer.aleo.org/v1/testnet3/block/{}", block_number);
+            let url_pre = env::var("API_PREFIX").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
+            let url = format!("{}/v1/testnet3/block/{}", url_pre, block_number);
 
             match reqwest::get(&url).await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<Block<N>>().await {
-                        index_data(&data).await;
+                        index_data(&data, &mut db_client).await;
                     }
                 },
                 Err(e) => eprintln!("Error fetching data: {}", e),
@@ -114,10 +131,11 @@ pub async fn sync_data() {
 
 
 async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
-    let block_number = match get_next_block_number(init_latest_height).await {
+    let mut db_client = connect_db().await.unwrap();
+    let block_number = match get_next_block_number(init_latest_height, &db_client).await {
         Ok(number) => number,
         Err(e) => {
-            return Ok(());
+            return Err(Box::new(IndexError(e)));
         }
     };
 
@@ -160,8 +178,7 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
             let percentage_complete =
                 block.height().saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
             println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
-
-            index_data(&block).await;
+            index_data(&block, &mut db_client).await;
         }
 
         current_start = current_end + 1;
@@ -171,9 +188,10 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
 }
 
 async fn get_latest_height() -> Result<u32, Box<dyn Error>> {
-    let url = "https://api.explorer.aleo.org/v1/testnet3/block/height/latest";
+    let url_pre = env::var("API_PREFIX").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
+    let url = format!("{}/v1/testnet3/block/height/latest", url_pre);
     loop {
-        match reqwest::get(url).await {
+        match reqwest::get(&url).await {
             Ok(response) => {
                 let body = response.text().await?;
                 return Ok(body.parse::<u32>()?);
@@ -187,9 +205,9 @@ async fn get_latest_height() -> Result<u32, Box<dyn Error>> {
 
 }
 
-async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn Error>> {
+async fn get_next_block_number(init_latest_height: u32, db_client: &Client) -> Result<i64, Box<dyn Error>> {
     let mut local_latest_height = ANS_BLOCK_HEIGHT_START;
-    let db_client = connect().await.unwrap();
+
     let query = "select height from ansi.block order by height desc limit 1";
     let query = db_client.prepare(&query).await.unwrap();
     let rows = db_client.query(&query, &[]).await?;
@@ -212,21 +230,29 @@ async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn E
     Ok(height)
 }
 
-async fn connect() -> Result<Client, tokio_postgres::Error> {
+async fn connect_db() -> Result<Client, tokio_postgres::Error> {
     let conn_str = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
-    let (client, connection) = tokio_postgres::connect(&conn_str, NoTls).await?;
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("connection db err: {}", e)
-        }
-    });
 
-    Ok(client)
+    loop {
+        match tokio_postgres::connect(&conn_str, NoTls).await {
+            Ok((client, connection)) => {
+                tokio::spawn(async move {
+                    if let Err(e) = connection.await {
+                        eprintln!("connection db err: {}", e)
+                    }
+                });
+                return Ok(client);
+            }
+            Err(err) => {
+                eprintln!("Error connecting to the database: {}", err);
+                sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 }
 
-async fn index_data(block: &Block<N>) {
+async fn index_data(block: &Block<N>, mut db_client: &mut Client) {
     println!("Process block {} on {}", block.height(), block.timestamp());
-    let mut db_client = connect().await.unwrap();
     let db_trans = db_client.transaction().await.unwrap();
 
     db_trans.execute("INSERT INTO ansi.block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
@@ -277,9 +303,9 @@ async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, 
         let resolver_arg = args.get(3).unwrap();
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let name = parse_u128x4(name_arg).unwrap();
+        let name = parse_str_4u128(name_arg).unwrap();
         let parent: String = parse_field(parent_arg).unwrap();
-        let resolver = parse_u128(resolver_arg).unwrap();
+        let resolver = parse_str_u128(resolver_arg).unwrap();
         let mut full_name = name.clone();
 
         let query = "SELECT full_name FROM ansi.ans_name WHERE name_hash=$1 limit 1";
@@ -314,7 +340,7 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
 
         let registrar: String = parse_address(registrar_arg).unwrap();
         let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let name = parse_u128x4(name_arg).unwrap();
+        let name = parse_str_4u128(name_arg).unwrap();
 
         db_trans.execute("INSERT INTO ansi.ans_name (name_hash, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5, $6, $7, $8) ON CONFLICT (name_hash) DO NOTHING",
@@ -330,64 +356,6 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
         println!(">> register_tld: Error")
     };
 
-}
-
-fn parse_u128x4(name_arg: &Argument<N>) -> Result<String, String> {
-    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
-    let mut name: [u8; 64] = [0; 64];
-
-    name[0..16].copy_from_slice(&name_bytes[11..27]);
-    name[16..32].copy_from_slice(&name_bytes[32..48]);
-    name[32..48].copy_from_slice(&name_bytes[53..69]);
-    name[48..64].copy_from_slice(&name_bytes[74..90]);
-
-    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
-}
-
-fn parse_u128x8(name_arg: &Argument<N>) -> Result<String, String> {
-    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
-    let mut name: [u8; 128] = [0; 128];
-
-    name[0..16].copy_from_slice(&name_bytes[11..27]);
-    name[16..32].copy_from_slice(&name_bytes[32..48]);
-    name[32..48].copy_from_slice(&name_bytes[53..69]);
-    name[48..64].copy_from_slice(&name_bytes[74..90]);
-    name[64..80].copy_from_slice(&name_bytes[95..111]);
-    name[80..96].copy_from_slice(&name_bytes[116..132]);
-    name[96..112].copy_from_slice(&name_bytes[137..153]);
-    name[112..128].copy_from_slice(&name_bytes[158..174]);
-
-    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
-}
-
-fn parse_u128(name_arg: &Argument<N>) -> Result<String, String> {
-    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
-    let mut name: [u8; 16] = [0; 16];
-
-    name[0..16].copy_from_slice(&name_bytes[4..20]);
-    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
-}
-
-fn parse_field(field_arg: &Argument<N>) -> Result<String, String> {
-    let field_arg_bytes = Argument::to_bytes_le(field_arg).unwrap();
-
-    if field_arg_bytes.len() >= 32 {
-        let last_32: &[u8] = &field_arg_bytes[field_arg_bytes.len() - 32..];
-        Ok(format!("{}", Field::<N>::from_bytes_le(last_32).unwrap()))
-    } else {
-        Err("e".to_string())
-    }
-}
-
-fn parse_address(address_arg: &Argument<N>) -> Result<String, String> {
-    let address_arg_bytes = Argument::to_bytes_le(address_arg).unwrap();
-
-    if address_arg_bytes.len() >= 32 {
-        let last_32: &[u8] = &address_arg_bytes[address_arg_bytes.len() - 32..];
-        Ok(format!("{}", Address::<N>::from_bytes_le(last_32).unwrap()))
-    } else {
-        Err("e".to_string())
-    }
 }
 
 async fn convert_private_to_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
@@ -528,7 +496,7 @@ async fn set_resolver(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
         let owner: String = parse_address(owner_arg).unwrap();
-        let resolver = parse_u128(resolver_arg).unwrap();
+        let resolver = parse_str_u128(resolver_arg).unwrap();
 
         db_trans.execute("UPDATE ansi.ans_name set resolver=$1  WHERE name_hash=$2 ",
                          &[&resolver, &name_hash]
@@ -552,8 +520,8 @@ async fn set_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: 
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
         let owner = parse_address(owner_arg).unwrap();
-        let category: String = parse_u128(category_arg).unwrap();
-        let content = parse_u128x8(content_arg).unwrap();
+        let category: String = parse_str_u128(category_arg).unwrap();
+        let content = parse_str_8u128(content_arg).unwrap();
 
         let mut version = 1;
         let query = "SELECT version FROM ansi.ans_name_version WHERE name_hash=$1 limit 1";
@@ -586,7 +554,7 @@ async fn unset_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
         let owner = parse_address(owner_arg).unwrap();
-        let category: String = parse_u128(category_arg).unwrap();
+        let category: String = parse_str_u128(category_arg).unwrap();
 
         let mut version = 1;
         let query = "SELECT version FROM ansi.ans_name_version WHERE name_hash=$1 limit 1";
@@ -644,4 +612,63 @@ async fn burn(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, tran
     } else {
         println!(">> burn: Error")
     };
+}
+
+// parse argument
+fn parse_str_4u128(name_arg: &Argument<N>) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 64] = [0; 64];
+
+    name[0..16].copy_from_slice(&name_bytes[11..27]);
+    name[16..32].copy_from_slice(&name_bytes[32..48]);
+    name[32..48].copy_from_slice(&name_bytes[53..69]);
+    name[48..64].copy_from_slice(&name_bytes[74..90]);
+
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
+}
+
+fn parse_str_8u128(name_arg: &Argument<N>) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 128] = [0; 128];
+
+    name[0..16].copy_from_slice(&name_bytes[11..27]);
+    name[16..32].copy_from_slice(&name_bytes[32..48]);
+    name[32..48].copy_from_slice(&name_bytes[53..69]);
+    name[48..64].copy_from_slice(&name_bytes[74..90]);
+    name[64..80].copy_from_slice(&name_bytes[95..111]);
+    name[80..96].copy_from_slice(&name_bytes[116..132]);
+    name[96..112].copy_from_slice(&name_bytes[137..153]);
+    name[112..128].copy_from_slice(&name_bytes[158..174]);
+
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
+}
+
+fn parse_str_u128(name_arg: &Argument<N>) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 16] = [0; 16];
+
+    name[0..16].copy_from_slice(&name_bytes[4..20]);
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
+}
+
+fn parse_field(field_arg: &Argument<N>) -> Result<String, String> {
+    let field_arg_bytes = Argument::to_bytes_le(field_arg).unwrap();
+
+    if field_arg_bytes.len() >= 32 {
+        let last_32: &[u8] = &field_arg_bytes[field_arg_bytes.len() - 32..];
+        Ok(format!("{}", Field::<N>::from_bytes_le(last_32).unwrap()))
+    } else {
+        Err("e".to_string())
+    }
+}
+
+fn parse_address(address_arg: &Argument<N>) -> Result<String, String> {
+    let address_arg_bytes = Argument::to_bytes_le(address_arg).unwrap();
+
+    if address_arg_bytes.len() >= 32 {
+        let last_32: &[u8] = &address_arg_bytes[address_arg_bytes.len() - 32..];
+        Ok(format!("{}", Address::<N>::from_bytes_le(last_32).unwrap()))
+    } else {
+        Err("e".to_string())
+    }
 }
