@@ -128,36 +128,43 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
 
     println!("Sync {total_blocks} blocks from CDN (0% complete)...");
 
-    let cdn_request_start = start.saturating_sub(start % MAX_BLOCK_RANGE);
-    let cdn_request_end = end.saturating_sub(end % MAX_BLOCK_RANGE);
+    let mut current_start = start;
+    let batch_size = 1000u32;
 
-    let mut blocks_to_process = Arc::new(Mutex::new(Vec::new()));
-    let blocks_to_process_clone = blocks_to_process.clone();
+    while current_start < end {
+        let current_end = std::cmp::min(current_start + batch_size, end);
 
-    // Scan the blocks via the CDN.
-    let _ = snarkos_node_cdn::load_blocks(
-        &CDN_ENDPOINT,
-        cdn_request_start,
-        Some(cdn_request_end),
-        move |block| {
-            // Check if the block is within the requested range.
-            if block.height() >= start && block.height() <= end {
-                let mut blocks = blocks_to_process_clone.lock().unwrap();
-                blocks.push(block);
-            }
+        let cdn_request_start = current_start.saturating_sub(current_start % MAX_BLOCK_RANGE);
+        let cdn_request_end = current_end.saturating_sub(current_end % MAX_BLOCK_RANGE);
 
-            Ok(())
-        },
-    ).await;
+        let blocks_to_process = Arc::new(Mutex::new(Vec::new()));
+        let blocks_to_process_clone = blocks_to_process.clone();
 
-    let blocks = blocks_to_process.lock().unwrap().clone();
-    let mut block_stream = stream::iter(blocks);
-    while let Some(block) = block_stream.next().await {
-        let percentage_complete =
-            block.height().saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
-        println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
+        // Scan the blocks via the CDN.
+        let _ = snarkos_node_cdn::load_blocks(
+            &CDN_ENDPOINT,
+            cdn_request_start,
+            Some(cdn_request_end),
+            move |block| {
+                if block.height() >= start && block.height() <= end {
+                    let mut blocks = blocks_to_process_clone.lock().unwrap();
+                    blocks.push(block);
+                }
+                Ok(())
+            },
+        ).await;
 
-        index_data(&block).await;
+        let blocks = blocks_to_process.lock().unwrap().clone();
+        let mut block_stream = stream::iter(blocks);
+        while let Some(block) = block_stream.next().await {
+            let percentage_complete =
+                block.height().saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
+            println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
+
+            index_data(&block).await;
+        }
+
+        current_start = current_end + 1;
     }
 
     Ok(())
