@@ -201,7 +201,14 @@ pub(crate) async fn get_statistic_data(pool: &Data<Pool>) -> Result<AnsStatistic
     let total_nft:i64 = row2.get(0);
     let total_owner = row2.get(1);
 
+    let query_last_block = "SELECT height FROM ans3.block order by height desc limit 1";
+    let query_last_block = client.prepare(&query_last_block).await.unwrap();
+    let row_last_block = client.query_one(&query_last_block, &[]).await?;
+    let block_height:i64 = row_last_block.get(0);
+
     let st= AnsStatistic {
+        healthy: true,
+        block_height,
         cal_time: cur_time,
         total_names,
         total_names_24h,
