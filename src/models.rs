@@ -56,6 +56,8 @@ pub struct AnsTokenAttr {
 
 #[derive(Serialize, Deserialize)]
 pub struct AnsStatistic {
+    pub healthy: bool,
+    pub block_height: i64,
     pub cal_time: u64,
     pub total_names_24h: i64,
     pub total_names: i64,
