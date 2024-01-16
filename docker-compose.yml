@@ -1,6 +1,23 @@
 version: '2'
 
 services:
+  postgresql:
+    container_name: postgresql
+    environment:
+      - PGID=1000
+      - POSTGRES_DB=ans
+      - POSTGRES_PASSWORD=ansPwd
+      - POSTGRES_USER=ansUsr
+      - PUID=1000
+      - TZ=Asia/Shanghai
+    image: postgres:15.3
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    volumes:
+      - ./.db:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
   redis:
     image: redis:alpine
     restart: always
@@ -15,12 +32,13 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - redis
+      - postgresql
     environment:
       URL_HOST: https://api.explorer.aleo.org/v1
       PROGRAM: aleo_name_service_registry_v1.aleo
       REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: postgresql://casaos:casaos@10.0.0.17:5432/aleoe
-      VIRTUAL_HOST: api.aleonames.id,api.aleonames.local
+      DATABASE_URL: postgresql://ansUsr:ansPwd@postgresql:5432/ans
+      VIRTUAL_HOST: api.aleonames.local
       LOG_STORE: ans
     restart: always
 
