@@ -154,9 +154,14 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
 
         let cdn_request_start = current_start.saturating_sub(current_start % MAX_BLOCK_RANGE);
         let cdn_request_end = current_end.saturating_sub(current_end % MAX_BLOCK_RANGE);
+        if cdn_request_end == cdn_request_start {
+            break;
+        }
 
         let blocks_to_process = Arc::new(Mutex::new(Vec::new()));
         let blocks_to_process_clone = blocks_to_process.clone();
+
+        println!("Sync blocks [{cdn_request_start} to {cdn_request_end}] from CDN");
 
         // Scan the blocks via the CDN.
         let _ = snarkos_node_cdn::load_blocks(
@@ -164,24 +169,34 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
             cdn_request_start,
             Some(cdn_request_end),
             move |block| {
-                if block.height() >= start && block.height() <= end {
-                    let mut blocks = blocks_to_process_clone.lock().unwrap();
-                    blocks.push(block);
-                }
+                let mut blocks = blocks_to_process_clone.lock().unwrap();
+                blocks.push(block);
                 Ok(())
             },
         ).await;
 
         let blocks = blocks_to_process.lock().unwrap().clone();
-        let mut block_stream = stream::iter(blocks);
-        while let Some(block) = block_stream.next().await {
-            let percentage_complete =
-                block.height().saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
-            println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
-            index_data(&block, &mut db_client).await;
-        }
+        let expected_block_count = if cdn_request_end - cdn_request_start < batch_size {
+            cdn_request_end - cdn_request_start
+        } else {
+            batch_size
+        } as usize;
 
-        current_start = current_end + 1;
+        if blocks.len() == expected_block_count {
+            let mut block_stream = stream::iter(blocks);
+            while let Some(block) = block_stream.next().await {
+                if block.height() >= start && block.height() <= end {
+                    index_data(&block, &mut db_client).await;
+                }
+            }
+            let percentage_complete =
+                cdn_request_end.saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
+            println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
+            current_start = current_end + cdn_request_end;
+        } else {
+            println!("Incomplete batch detected, expected {} blocks, got {}. Retrying...", expected_block_count, blocks.len());
+            // Do not update current_start to retry the same batch
+        }
     }
 
     Ok(())
@@ -251,7 +266,7 @@ async fn connect_db() -> Result<Client, tokio_postgres::Error> {
     }
 }
 
-async fn index_data(block: &Block<N>, mut db_client: &mut Client) {
+async fn index_data(block: &Block<N>, db_client: &mut Client) {
     println!("Process block {} on {}", block.height(), block.timestamp());
     let db_trans = db_client.transaction().await.unwrap();
 
@@ -291,7 +306,7 @@ async fn index_data(block: &Block<N>, mut db_client: &mut Client) {
 
 /**
 process all register transition
-**/
+ **/
 async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
@@ -333,7 +348,7 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let hash_caller_arg = args.get(0).unwrap();
+        // let hash_caller_arg = args.get(0).unwrap();
         let registrar_arg = args.get(1).unwrap();
         let name_hash_arg = args.get(2).unwrap();
         let name_arg = args.get(3).unwrap();
