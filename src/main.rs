@@ -10,6 +10,7 @@ use actix_web_prom::PrometheusMetricsBuilder;
 use base64::encode;
 use deadpool_redis::redis::cmd;
 use reqwest::StatusCode;
+use actix_governor::{Governor, GovernorConfigBuilder};
 
 use models::*;
 
@@ -321,6 +322,12 @@ async fn main() -> std::io::Result<()> {
         .build()
         .unwrap();
 
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(3)
+        .burst_size(20)
+        .finish()
+        .unwrap();
+
     println!("start server listening in 0.0.0.0:8080");
     HttpServer::new(move || {
         App::new()
@@ -330,6 +337,7 @@ async fn main() -> std::io::Result<()> {
             )
             .wrap(prometheus.clone())
             .wrap(auth::Authentication)
+            .wrap(Governor::new(&governor_conf))
             .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)
