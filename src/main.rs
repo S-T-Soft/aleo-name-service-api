@@ -350,7 +350,8 @@ async fn main() -> std::io::Result<()> {
         .build()
         .unwrap();
 
-    let trusted_reverse_proxy_ip = IpAddr::from_str("0.0.0.0").unwrap();
+
+    let trusted_reverse_proxy_ip = env::var("REVERSE_IP").unwrap_or_else(|_| "0.0.0.0".to_string());
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(2)
         .burst_size(32)
@@ -372,7 +373,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(prometheus.clone())
             .wrap(auth::Authentication)
             .wrap(Governor::new(&governor_conf))
-            .app_data(web::Data::new(trusted_reverse_proxy_ip))
+            .app_data(web::Data::new(IpAddr::from_str(&trusted_reverse_proxy_ip).unwrap()))
             .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)

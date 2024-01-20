@@ -1,7 +1,7 @@
 use std::env;
 use futures_util::future::LocalBoxFuture;
 use std::future::{ready, Ready};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr};
 use std::str::FromStr;
 use actix_governor::{KeyExtractor, SimpleKeyExtractionError};
 
@@ -99,10 +99,8 @@ impl KeyExtractor for RealIpKeyExtractor {
                     SimpleKeyExtractionError::new("Could not extract real IP address from request")
                 })
                 .and_then(|str| {
-                    info!("[req]: remote ip {}", str);
-                    SocketAddr::from_str(str)
-                        .map(|socket| socket.ip())
-                        .or_else(|_| IpAddr::from_str(str))
+                    info!("[req]: remote ip r {}", str);
+                    IpAddr::from_str(str)
                         .map_err(|_| {
                             SimpleKeyExtractionError::new(
                                 "Could not extract real IP address from request",
@@ -116,13 +114,14 @@ impl KeyExtractor for RealIpKeyExtractor {
                     SimpleKeyExtractionError::new("Could not extract peer IP address from request")
                 })
                 .and_then(|str| {
-                    SocketAddr::from_str(str).map_err(|_| {
-                        SimpleKeyExtractionError::new(
+                    info!("[req]: remote ip local {}", str);
+                    IpAddr::from_str(str)
+                        .map_err(|_| {
+                            SimpleKeyExtractionError::new(
                             "Could not extract peer IP address from request",
                         )
                     })
                 })
-                .map(|socket| socket.ip()),
         }
     }
 
