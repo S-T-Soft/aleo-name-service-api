@@ -6,6 +6,7 @@ use deadpool_redis::{Config as RedisConfig, Runtime as RedisRuntime};
 use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
+use std::net::IpAddr;
 use actix_web_prom::PrometheusMetricsBuilder;
 use base64::encode;
 use deadpool_redis::redis::cmd;
@@ -17,6 +18,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use models::*;
+use crate::auth::RealIpKeyExtractor;
 
 mod utils;
 mod client;
@@ -348,9 +350,11 @@ async fn main() -> std::io::Result<()> {
         .build()
         .unwrap();
 
+    let trusted_reverse_proxy_ip = IpAddr::from_str("0.0.0.0").unwrap();
     let governor_conf = GovernorConfigBuilder::default()
-        .per_second(3)
-        .burst_size(20)
+        .per_second(2)
+        .burst_size(32)
+        .key_extractor(RealIpKeyExtractor)
         .finish()
         .unwrap();
 
@@ -368,6 +372,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(prometheus.clone())
             .wrap(auth::Authentication)
             .wrap(Governor::new(&governor_conf))
+            .app_data(web::Data::new(trusted_reverse_proxy_ip))
             .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)
