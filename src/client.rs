@@ -2,10 +2,11 @@ use reqwest;
 use std::env;
 use regex::Regex;
 use serde::Deserialize;
-// // use urlencoding;
+// use urlencoding;
 use crate::utils;
 use deadpool_redis::{Pool, redis::{cmd}};
-use actix_web::web::Data;
+// use actix_web::web::Data;
+use tracing::{info, instrument, warn};
 
 #[derive(Deserialize, Debug)]
 pub struct NameStruct {
@@ -29,7 +30,7 @@ async fn call_api(url: String) -> Result<String, String> {
     let resp = match resp {
         Ok(resp) => resp,
         Err(err) => {
-            println!("Error getting content: {}", err);
+            warn!("Error getting content: {}", err);
             return Err(err.to_string());
         }
     };
@@ -126,9 +127,8 @@ pub async fn check_name_hash(name: &String) -> Result<String, String> {
     };
 
     let url = format!("{}/mapping/names/{}", get_base_uri(), &name_hash);
-    let resp = call_api(url).await?;
-    let json = parse(&resp);
-    println!("{}", json);
+    let _ = call_api(url).await?;
+
     Ok( name_hash )
 }
 
@@ -205,11 +205,20 @@ pub async fn check_name_hash(name: &String) -> Result<String, String> {
 //     let content = utils::reverse_parse_label(name[0], name[1], name[2], name[3])?;
 //     Ok( content )
 // }
+#[instrument]
+pub async fn get_last_height() -> Result<u32, String> {
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1".to_string());
+    let url = format!("{}/testnet3/block/height/latest", url_host);
+    let resp = call_api(url).await?;
+    let height: u32 = resp.parse().unwrap_or_else(|_| 0);
+    Ok( height)
+}
+
 
 pub(crate) async fn is_n_query_from_api(redis_pool: &Pool) -> bool {
     let mut conn = redis_pool.get().await.unwrap();
     let indexer_height: u32 = cmd("GET").arg(&["indexer:height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
     let last_height: u32 = cmd("GET").arg(&["cache:api_height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
-    println!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
+    info!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
     return last_height - indexer_height > 16;
 }
