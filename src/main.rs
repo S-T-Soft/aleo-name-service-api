@@ -70,7 +70,7 @@ async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: we
     let name_hash = match name_hash {
         Ok(_hash) => _hash,
         Err(_e) => {
-            if client::is_n_query_from_api(&redis_pool) {
+            if client::is_n_query_from_api(&redis_pool).await {
                 match client::check_name_hash(&name).await {
                     Ok(v) => v.to_string(),
                     Err(_) => "".to_string()
@@ -88,7 +88,7 @@ async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: we
     match address.await {
         Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
         Err(_e) => {
-            if client::is_n_query_from_api(&redis_pool) {
+            if client::is_n_query_from_api(&redis_pool).await {
                 return match client::get_owner(&name_hash).await {
                     Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
                     Err(_) => HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() })

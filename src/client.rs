@@ -206,7 +206,10 @@ pub async fn check_name_hash(name: &String) -> Result<String, String> {
 //     Ok( content )
 // }
 
-
-pub(crate) fn is_n_query_from_api(redis_pool: &Pool) -> bool {
-    return true;
+pub(crate) async fn is_n_query_from_api(redis_pool: &Pool) -> bool {
+    let mut conn = redis_pool.get().await.unwrap();
+    let indexer_height: u32 = cmd("GET").arg(&["indexer:height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
+    let last_height: u32 = cmd("GET").arg(&["cache:api_height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
+    println!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
+    return last_height - indexer_height > 16;
 }
