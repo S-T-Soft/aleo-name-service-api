@@ -355,7 +355,7 @@ async fn main() -> std::io::Result<()> {
     let trusted_reverse_proxy_ip = env::var("REVERSE_IP").unwrap_or_else(|_| "0.0.0.0".to_string());
     let governor_conf = GovernorConfigBuilder::default()
         .per_second(2)
-        .burst_size(3200)
+        .burst_size(64)
         .key_extractor(RealIpKeyExtractor)
         .finish()
         .unwrap();
