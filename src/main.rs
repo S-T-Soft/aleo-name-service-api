@@ -3,7 +3,7 @@ use actix_cors::Cors;
 use serde::Deserialize;
 use serde_json;
 use deadpool_redis::{Config as RedisConfig, Runtime as RedisRuntime};
-use snarkvm_console_program::{Field, FromStr};
+use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
 use actix_web_prom::PrometheusMetricsBuilder;
@@ -11,6 +11,10 @@ use base64::encode;
 use deadpool_redis::redis::cmd;
 use reqwest::StatusCode;
 use actix_governor::{Governor, GovernorConfigBuilder};
+use tracing::{info, warn};
+use tracing_subscriber::{EnvFilter, fmt, Registry};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use models::*;
 
@@ -20,6 +24,7 @@ mod db;
 mod models;
 mod auth;
 mod indexer;
+mod job;
 
 #[derive(Deserialize)]
 struct GetResolverParams {
@@ -34,7 +39,7 @@ async fn name_to_hash(name: web::Path<String>) -> impl Responder {
     let name_hash = match name_hash {
         Ok(value) => value.to_string(),
         Err(e) => {
-            println!("Error parsing name: {}", e);
+            warn!("Error parsing name: {} .. {}", &name, e);
             return HttpResponse::InternalServerError().json(serde_json::json!({ "error": format!("Error parsing name: {}", e) }));
         }
     };
@@ -106,7 +111,7 @@ async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: we
 async fn resolver(db_pool: web::Data<deadpool_postgres::Pool>, resolver_params: web::Query<GetResolverParams>) -> impl Responder {
     let name = resolver_params.name.clone();
     let category = resolver_params.category.clone();
-    println!("name: {}, category: {}", name, category);
+    info!("name: {}, category: {}", &name, &category);
 
     let name_hash = db::get_hash_by_name(&db_pool, &name).await;
     let name_hash = match name_hash {
@@ -208,7 +213,7 @@ async fn token_png(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::
             let mut fill_bg = "paint0_linear";
             let mut fill_bg_base64 = "".to_string();
             if !avatar_url.is_empty() {
-                println!("image url: {}", &avatar_url);
+                info!("image url: {}", &avatar_url);
                 let response = reqwest::get(&avatar_url).await.unwrap();
                 if response.status() == StatusCode::OK {
                     let resp_headers = response.headers().clone();
@@ -323,6 +328,8 @@ async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: web:
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    init_tracing();
+
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
     let redis_cfg = RedisConfig::from_url(redis_url);
     let redis_pool = redis_cfg.create_pool(Some(RedisRuntime::Tokio1)).unwrap();
@@ -350,6 +357,10 @@ async fn main() -> std::io::Result<()> {
 
     tokio::spawn(async {
         indexer::sync_data().await;
+    });
+
+    tokio::spawn(async {
+        job::run().await;
     });
 
     println!("start server listening in 0.0.0.0:8080");
@@ -381,4 +392,10 @@ async fn main() -> std::io::Result<()> {
     .bind("0.0.0.0:8080")?
     .run()
     .await
+}
+
+fn init_tracing() {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let formatting_layer = fmt::layer().with_writer(std::io::stderr);
+    Registry::default().with(env_filter).with(formatting_layer).init();
 }

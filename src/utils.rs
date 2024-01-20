@@ -3,6 +3,7 @@ use std::cmp::min;
 use snarkvm_console_program::{Field, Value};
 use snarkvm_console_network::prelude::Zero;
 use snarkvm_console_network::{Network, Testnet3, ToFields};
+use tracing::info;
 
 type N = Testnet3;
 
@@ -68,7 +69,7 @@ pub fn parse_label(name: &str, parent: Field<N>) -> Result<Value<N>, String> {
     let name_str = parse_label_string(name, true)?;
     let names = format!("{{name: {}, parent: {}}}", &name_str, parent);
 
-    println!("{}", names);
+    info!("parse_label {} : {}", &name, &names);
 
     Ok (Value::<N>::try_from(&names).map_err(|e| e.to_string())?)
 }
