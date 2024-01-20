@@ -1,124 +1,136 @@
-// use reqwest;
-// use std::env;
-// use regex::Regex;
-// use serde::Deserialize;
+use reqwest;
+use std::env;
+use regex::Regex;
+use serde::Deserialize;
 // // use urlencoding;
-// use crate::utils;
-// use deadpool_redis::{Pool, redis::{cmd}};
-//
-// #[derive(Deserialize, Debug)]
-// pub struct NameStruct {
-//     pub name: [u128; 4],
-//     pub parent: String,
-//     pub resolver: u128
-// }
-//
-// fn get_base_uri() -> String {
-//     let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1".to_string());
-//     let program = env::var("PROGRAM").unwrap_or_else(|_| "aleo_name_service_registry_v1.aleo".to_string());
-//     let base_uri = format!("{}/testnet3/program/{}", url_host, program);
-//     base_uri
-// }
+use crate::utils;
+use deadpool_redis::{Pool, redis::{cmd}};
+use actix_web::web::Data;
 
-// async fn call_api(url: String) -> Result<String, String> {
-//     // Make the request
-//     let resp = reqwest::get(&url).await;
-//
-//     // Check if the request was successful
-//     let resp = match resp {
-//         Ok(resp) => resp,
-//         Err(err) => {
-//             println!("Error getting content: {}", err);
-//             return Err(err.to_string());
-//         }
-//     };
-//
-//     // Parse the response text
-//     let resp = resp.text().await.unwrap();
-//
-//     if resp.trim() == "null" {
-//         return Err("Error getting content".to_string());
-//     }
-//
-//     Ok( resp )
-// }
+#[derive(Deserialize, Debug)]
+pub struct NameStruct {
+    pub name: [u128; 4],
+    pub parent: String,
+    pub resolver: u128
+}
 
+fn get_base_uri() -> String {
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1".to_string());
+    let program = env::var("PROGRAM").unwrap_or_else(|_| "aleo_name_service_registry_v3.aleo".to_string());
+    let base_uri = format!("{}/testnet3/program/{}", url_host, program);
+    base_uri
+}
 
-// fn parse(content: &str) -> String {
-//     let lines: Vec<&str> = content.trim_matches('"').split("\\n").collect();
-//     let mut json_lines = Vec::new();
-//     let mut in_array = false;
-//
-//     for line in lines {
-//         let line = line.trim();
-//
-//         // Detect array start
-//         if line.ends_with("[") {
-//             in_array = true;
-//             let re = Regex::new(r#"(\w+): \[$"#).unwrap();
-//             let json_line = re.replace_all(line, r#""$1": ["#);
-//             json_lines.push(json_line.to_string());
-//             continue;
-//         }
-//
-//         // Detect array end
-//         if line.starts_with("]") {
-//             in_array = false;
-//             json_lines.push("],".to_string());  // Add a comma after the array
-//             continue;
-//         }
-//
-//         // Inside an array
-//         if in_array {
-//             let re = Regex::new(r#"(\d+)u\d+(,)?$"#).unwrap();
-//             let json_line = re.replace_all(line, r#"$1$2"#);
-//             json_lines.push(json_line.to_string());
-//             continue;
-//         }
-//
-//         // Object keys and values
-//         if line.contains(":") {
-//             let re = Regex::new(r#"(\w+): (\w+)u\d+(,)?$"#).unwrap();
-//             let json_line = re.replace_all(line, r#""$1": $2$3"#);
-//
-//             let re = Regex::new(r#"(\w+): (\w+)(,)?$"#).unwrap();
-//             let json_line = re.replace_all(&json_line, r#""$1": "$2"$3"#);
-//
-//             let re = Regex::new(r#"(\w+): (\d+)$"#).unwrap();
-//             let json_line = re.replace_all(&json_line, r#""$1": $2"#);
-//
-//             json_lines.push(json_line.to_string());
-//             continue;
-//         }
-//
-//         // Just append braces and other lines as-is
-//         json_lines.push(line.to_string());
-//     }
-//
-//     // Remove the trailing comma in the last key-value pair
-//     if let Some(last) = json_lines.last_mut() {
-//         if last.ends_with(",") {
-//             last.pop();
-//         }
-//     }
-//
-//     // Join lines into a single JSON string
-//     let json = json_lines.join("\n");
-//
-//     json
-// }
+async fn call_api(url: String) -> Result<String, String> {
+    // Make the request
+    let resp = reqwest::get(&url).await;
+
+    // Check if the request was successful
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(err) => {
+            println!("Error getting content: {}", err);
+            return Err(err.to_string());
+        }
+    };
+
+    // Parse the response text
+    let resp = resp.text().await.unwrap();
+
+    if resp.trim() == "null" {
+        return Err("Error getting content".to_string());
+    }
+
+    Ok( resp )
+}
 
 
-// pub async fn get_owner(name_hash: String) -> Result<String, String> {
-//     // get address from name_hash
-//     let url = format!("{}/mapping/nft_owners/{}", get_base_uri(), name_hash);
-//     let resp = call_api(url).await?;
-//
-//     let address = parse(&resp);
-//
-//     Ok( address )
-// }
+fn parse(content: &str) -> String {
+    let lines: Vec<&str> = content.trim_matches('"').split("\\n").collect();
+    let mut json_lines = Vec::new();
+    let mut in_array = false;
 
+    for line in lines {
+        let line = line.trim();
+
+        // Detect array start
+        if line.ends_with("[") {
+            in_array = true;
+            let re = Regex::new(r#"(\w+): \[$"#).unwrap();
+            let json_line = re.replace_all(line, r#""$1": ["#);
+            json_lines.push(json_line.to_string());
+            continue;
+        }
+
+        // Detect array end
+        if line.starts_with("]") {
+            in_array = false;
+            json_lines.push("],".to_string());  // Add a comma after the array
+            continue;
+        }
+
+        // Inside an array
+        if in_array {
+            let re = Regex::new(r#"(\d+)u\d+(,)?$"#).unwrap();
+            let json_line = re.replace_all(line, r#"$1$2"#);
+            json_lines.push(json_line.to_string());
+            continue;
+        }
+
+        // Object keys and values
+        if line.contains(":") {
+            let re = Regex::new(r#"(\w+): (\w+)u\d+(,)?$"#).unwrap();
+            let json_line = re.replace_all(line, r#""$1": $2$3"#);
+
+            let re = Regex::new(r#"(\w+): (\w+)(,)?$"#).unwrap();
+            let json_line = re.replace_all(&json_line, r#""$1": "$2"$3"#);
+
+            let re = Regex::new(r#"(\w+): (\d+)$"#).unwrap();
+            let json_line = re.replace_all(&json_line, r#""$1": $2"#);
+
+            json_lines.push(json_line.to_string());
+            continue;
+        }
+
+        // Just append braces and other lines as-is
+        json_lines.push(line.to_string());
+    }
+
+    // Remove the trailing comma in the last key-value pair
+    if let Some(last) = json_lines.last_mut() {
+        if last.ends_with(",") {
+            last.pop();
+        }
+    }
+
+    // Join lines into a single JSON string
+    let json = json_lines.join("\n");
+
+    json
+}
+
+
+pub async fn get_owner(name_hash: &String) -> Result<String, String> {
+    // get address from name_hash
+    let url = format!("{}/mapping/nft_owners/{}", get_base_uri(), name_hash);
+    let resp = call_api(url).await?;
+    let address = parse(&resp);
+
+    Ok( address )
+}
+
+pub async fn check_name_hash(name: &String) -> Result<String, String> {
+    let name_hash = match utils::parse_name_hash(&name) {
+        Ok(v) => v.to_string(),
+        Err(_) => {return Err("fail parse name hash!".to_string());}
+    };
+
+    let url = format!("{}/mapping/names/{}", get_base_uri(), &name_hash);
+    let resp = call_api(url).await?;
+    let json = parse(&resp);
+    println!("{}", json);
+    Ok( name_hash )
+}
 
 // pub async fn get_name(name_hash: String) -> Result<NameStruct, String> {
 //     // get address from name_hash
@@ -193,3 +205,8 @@
 //     let content = utils::reverse_parse_label(name[0], name[1], name[2], name[3])?;
 //     Ok( content )
 // }
+
+
+pub(crate) fn is_n_query_from_api(redis_pool: &Pool) -> bool {
+    return true;
+}

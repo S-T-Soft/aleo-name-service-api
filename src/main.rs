@@ -3,7 +3,7 @@ use actix_cors::Cors;
 use serde::Deserialize;
 use serde_json;
 use deadpool_redis::{Config as RedisConfig, Runtime as RedisRuntime};
-use snarkvm_console_program::FromStr;
+use snarkvm_console_program::{Field, FromStr};
 use tokio_postgres::NoTls;
 use std::env;
 use actix_web_prom::PrometheusMetricsBuilder;
@@ -64,20 +64,39 @@ async fn name_api(db_pool: web::Data<deadpool_postgres::Pool>, address: web::Pat
 }
 
 #[get("/address/{name}")]
-async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Path<String>) -> impl Responder {
+async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: web::Data<deadpool_redis::Pool>, name: web::Path<String>) -> impl Responder {
     let name = name.into_inner();
     let name_hash = db::get_hash_by_name(&db_pool, &name).await;
     let name_hash = match name_hash {
         Ok(_hash) => _hash,
         Err(_e) => {
-            return HttpResponse::NotFound().finish();
+            if client::is_n_query_from_api(&redis_pool) {
+                match client::check_name_hash(&name).await {
+                    Ok(v) => v.to_string(),
+                    Err(_) => "".to_string()
+                }
+            } else {
+                "".to_string()
+            }
         }
     };
+    if name_hash.is_empty() {
+        return HttpResponse::NotFound().finish();
+    }
     let address = db::get_address_by_hash(&db_pool, &name_hash);
 
     match address.await {
         Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
-        Err(_e) => HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() }),
+        Err(_e) => {
+            if client::is_n_query_from_api(&redis_pool) {
+                return match client::get_owner(&name_hash).await {
+                    Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
+                    Err(_) => HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() })
+                };
+            }
+
+            HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() })
+        },
     }
 }
 
