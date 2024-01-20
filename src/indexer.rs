@@ -1,5 +1,3 @@
-// indexer.rs
-
 use std::{env, fmt};
 use std::error::Error;
 use std::time::Duration;
@@ -14,6 +12,7 @@ use snarkvm_console_network::prelude::ToBytes;
 use snarkvm_console_program::{Field, Address, Identifier, FromField, Argument, FromBytes};
 use snarkvm_ledger_block::{Transition};
 use tokio_postgres::{Client, NoTls};
+use tracing::{error, info, warn};
 
 type N = Testnet3;
 static MAX_BLOCK_RANGE: u32 = 50;
@@ -98,7 +97,7 @@ impl Error for IndexError {}
 pub async fn sync_data() {
     let latest_height = get_latest_height().await.unwrap();
     match sync_from_cdn(latest_height).await {
-        Ok(_) => println!("sync from cdn finished!"),
+        Ok(_) => info!("sync from cdn finished!"),
         _ => {}
     }
 
@@ -144,7 +143,7 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
     let end = init_latest_height;
     let total_blocks = end.saturating_sub(start);
 
-    println!("Sync {total_blocks} blocks from CDN (0% complete)...");
+    info!("Sync {total_blocks} blocks from CDN (0% complete)...");
 
     let mut current_start = start;
     let batch_size = 1000u32;
@@ -161,7 +160,7 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
         let blocks_to_process = Arc::new(Mutex::new(Vec::new()));
         let blocks_to_process_clone = blocks_to_process.clone();
 
-        println!("Sync blocks [{cdn_request_start} to {cdn_request_end}] from CDN");
+        info!("Sync blocks [{cdn_request_start} to {cdn_request_end}] from CDN");
 
         // Scan the blocks via the CDN.
         let _ = snarkos_node_cdn::load_blocks(
@@ -191,10 +190,10 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
             }
             let percentage_complete =
                 cdn_request_end.saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
-            println!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
-            current_start = current_end + cdn_request_end;
+            info!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
+            current_start = cdn_request_end;
         } else {
-            println!("Incomplete batch detected, expected {} blocks, got {}. Retrying...", expected_block_count, blocks.len());
+            warn!("Incomplete batch detected, expected {} blocks, got {}. Retrying...", expected_block_count, blocks.len());
             // Do not update current_start to retry the same batch
         }
     }
@@ -235,7 +234,7 @@ async fn get_next_block_number(init_latest_height: u32, db_client: &Client) -> R
         latest_height = get_latest_height().await?;
     }
 
-    println!("Latest height: {}", latest_height);
+    info!("Latest height: {}", latest_height);
 
     let height = if latest_height as i64 > local_latest_height {
         local_latest_height + 1
@@ -267,7 +266,7 @@ async fn connect_db() -> Result<Client, tokio_postgres::Error> {
 }
 
 async fn index_data(block: &Block<N>, db_client: &mut Client) {
-    println!("Process block {} on {}", block.height(), block.timestamp());
+    info!("Process block {} on {}", block.height(), block.timestamp());
     let db_trans = db_client.transaction().await.unwrap();
 
     db_trans.execute("INSERT INTO ans3.block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
@@ -277,8 +276,7 @@ async fn index_data(block: &Block<N>, db_client: &mut Client) {
         if transaction.is_accepted() {
             for transition in transaction.transitions() {
                 if transition.program_id().name() == &*PROGRAM_ID {
-                    println!("> process transition {}, function name: {}",
-                             transition.id(), transition.function_name());
+                    info!("process transition {}, function name: {}", transition.id(), transition.function_name());
                     match transition.function_name() {
                         name if name == &*REGISTER => register(&db_trans, &block, &transaction, transition).await,
                         name if name == &*REGISTER_TLD => register_tld(&db_trans, &block, &transaction, transition).await,
@@ -336,9 +334,9 @@ async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, 
                          &[&name_hash, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        println!(">> register: {} {} {} {} {}", name, parent, name_hash, full_name, resolver)
+        info!("register: {} {} {} {} {}", name, parent, name_hash, full_name, resolver)
     } else {
-        println!(">> register: Error")
+        error!("register: Error in {} | {}", block.height(), transaction.id())
     };
 
 }
@@ -366,9 +364,9 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
                          &[&name_hash, &registrar, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        println!(">> register_tld {} {} {}", name_hash, name, registrar)
+        info!("register_tld {} {} {}", name_hash, name, registrar)
     } else {
-        println!(">> register_tld: Error")
+        error!("register_tld: Error in {} | {}", block.height(), transaction.id())
     };
 
 }
@@ -389,9 +387,9 @@ async fn convert_private_to_public(db_trans: &tokio_postgres::Transaction<'_>, b
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        println!(">> convert_private_to_public {} {}", name_hash, owner)
+        info!("convert_private_to_public {} {}", name_hash, owner)
     } else {
-        println!(">> convert_private_to_public: Error")
+        error!("convert_private_to_public: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -415,9 +413,9 @@ async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, b
         ).await.unwrap();
         db_trans.execute("DELETE from ans3.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
 
-        println!(">> convert_public_to_private {} {}", name_hash, owner)
+        info!("convert_public_to_private {} {}", name_hash, owner)
     } else {
-        println!(">> convert_public_to_private: Error")
+        error!("convert_public_to_private: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -453,9 +451,9 @@ async fn transfer_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Blo
         ).await.unwrap();
         db_trans.execute("DELETE from ans3.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
 
-        println!(">> transfer_public {} {} caller {}", name_hash, owner, caller)
+        info!(">> transfer_public {} {} caller {}", name_hash, owner, caller)
     } else {
-        println!(">> transfer_public: Error")
+        error!(">> transfer_public: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -476,9 +474,9 @@ async fn set_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        println!(">> set_primary_name {} {}", name_hash, owner)
+        info!("set_primary_name {} {}", name_hash, owner)
     } else {
-        println!(">> set_primary_name: Error")
+        error!("set_primary_name: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -493,9 +491,9 @@ async fn unset_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &
 
         db_trans.execute("DELETE from ans3.ans_primary_name WHERE address=$1", &[&owner]).await.unwrap();
 
-        println!(">> unset_primary_name {}", owner)
+        info!("unset_primary_name {}", owner)
     } else {
-        println!(">> unset_primary_name: Error")
+        error!("unset_primary_name: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -517,9 +515,9 @@ async fn set_resolver(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
                          &[&resolver, &name_hash]
         ).await.unwrap();
 
-        println!(">> set_resolver {} {}", name_hash, owner)
+        info!("set_resolver {} {}", name_hash, owner)
     } else {
-        println!(">> set_resolver: Error")
+        error!("set_resolver: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -551,9 +549,9 @@ async fn set_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: 
                          &[&name_hash, &category, &version, &content, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        println!(">> set_resolver_record: {} {} {} {} {}", owner, name_hash, category, content, version)
+        info!("set_resolver_record: {} {} {} {} {}", owner, name_hash, category, content, version)
     } else {
-        println!(">> set_resolver_record: Error")
+        error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id())
     };
 
 }
@@ -583,9 +581,9 @@ async fn unset_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
                          &[&name_hash, &category, &version]
         ).await.unwrap();
 
-        println!(">> unset_resolver_record: {} {} {} {}", owner, name_hash, category, version)
+        info!("unset_resolver_record: {} {} {} {}", owner, name_hash, category, version)
     } else {
-        println!(">> set_resolver_record: Error")
+        error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -606,9 +604,9 @@ async fn clear_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        println!(">> clear_resolver_record: {} {} {}", owner, name_hash, version)
+        info!("clear_resolver_record: {} {} {}", owner, name_hash, version)
     } else {
-        println!(">> clear_resolver_record: Error")
+        error!("clear_resolver_record: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -623,9 +621,9 @@ async fn burn(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, tran
 
         db_trans.execute("DELETE from ans3.ans_name WHERE name_hash=$1", &[&name_hash]).await.unwrap();
 
-        println!(">> burn: {}", name_hash)
+        info!("burn: {} in {}|{}", name_hash, block.height(), transaction.id())
     } else {
-        println!(">> burn: Error")
+        error!("burn: Error  in {} | {}", block.height(), transaction.id())
     };
 }
 
