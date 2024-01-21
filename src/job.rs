@@ -5,7 +5,7 @@ use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime as RedisR
 use deadpool_redis::redis::cmd;
 use tokio::time::{sleep, timeout};
 use tokio_postgres::NoTls;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use crate::{client, db};
 
 pub async fn run() {
@@ -29,7 +29,9 @@ pub async fn run() {
         let timeout_duration = Duration::from_secs(10);
         let job1 = timeout(timeout_duration, job_get_api_height(&redis_pool));
         let job2 = timeout(timeout_duration, job_get_indexer_height(&redis_pool, &db_pool));
-        tokio::try_join!(job1, job2).expect("Failed to join jobs");
+        if let Err(err) = tokio::try_join!(job1, job2) {
+            warn!("fail join tasks!!! {}", err);
+        }
 
         sleep(Duration::from_secs(10)).await;
         job_get_statistic_data(&redis_pool, &db_pool).await;
