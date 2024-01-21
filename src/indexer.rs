@@ -1,5 +1,6 @@
 use std::{env, fmt};
 use std::error::Error;
+use std::str::FromStr;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use futures::stream::{self, StreamExt};
@@ -11,8 +12,9 @@ use reqwest;
 use snarkvm_console_network::prelude::ToBytes;
 use snarkvm_console_program::{Field, Address, Identifier, FromField, Argument, FromBytes};
 use snarkvm_ledger_block::{Transition};
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::NoTls;
 use tracing::{error, info, warn};
+use crate::client;
 
 type N = Testnet3;
 static MAX_BLOCK_RANGE: u32 = 50;
@@ -81,6 +83,17 @@ lazy_static! {
         .expect("Failed to create Field from bits");
     static ref BURN: Identifier<N> = Identifier::<N>::from_field(&*BURN_FIELD)
         .expect("Failed to create Identifier from Field");
+
+    // db config
+    static ref DB_POOL: deadpool_postgres::Pool = {
+        let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
+        let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
+        let mgr_config =deadpool_postgres::ManagerConfig {
+            recycling_method: deadpool_postgres::RecyclingMethod::Fast
+        };
+        let db_mgr = deadpool_postgres::Manager::from_config(db_config, NoTls, mgr_config);
+        deadpool_postgres::Pool::builder(db_mgr).max_size(3).build().unwrap()
+    };
 }
 
 #[derive(Debug)]
@@ -95,15 +108,14 @@ impl fmt::Display for IndexError {
 impl Error for IndexError {}
 
 pub async fn sync_data() {
-    let latest_height = get_latest_height().await.unwrap();
+    let latest_height = get_latest_height().await;
     match sync_from_cdn(latest_height).await {
         Ok(_) => info!("sync from cdn finished!"),
         _ => {}
     }
 
     loop {
-        let mut db_client = connect_db().await.unwrap();
-        let block_number = get_next_block_number(latest_height, &db_client).await.unwrap_or_else(|e| {
+        let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
             eprintln!("Error fetching next block number: {}", e);
             -1
         });
@@ -115,7 +127,7 @@ pub async fn sync_data() {
             match reqwest::get(&url).await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<Block<N>>().await {
-                        index_data(&data, &mut db_client).await;
+                        index_data(&data).await;
                     }
                 },
                 Err(e) => eprintln!("Error fetching data: {}", e),
@@ -130,8 +142,7 @@ pub async fn sync_data() {
 
 
 async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
-    let mut db_client = connect_db().await.unwrap();
-    let block_number = match get_next_block_number(init_latest_height, &db_client).await {
+    let block_number = match get_next_block_number(init_latest_height).await {
         Ok(number) => number,
         Err(e) => {
             return Err(Box::new(IndexError(e)));
@@ -185,7 +196,7 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
             let mut block_stream = stream::iter(blocks);
             while let Some(block) = block_stream.next().await {
                 if block.height() >= start && block.height() <= end {
-                    index_data(&block, &mut db_client).await;
+                    index_data(&block).await;
                 }
             }
             let percentage_complete =
@@ -201,26 +212,21 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn get_latest_height() -> Result<u32, Box<dyn Error>> {
-    let url_pre = env::var("API_PREFIX").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
-    let url = format!("{}/v1/testnet3/block/height/latest", url_pre);
+async fn get_latest_height() -> u32 {
     loop {
-        match reqwest::get(&url).await {
-            Ok(response) => {
-                let body = response.text().await?;
-                return Ok(body.parse::<u32>()?);
-            }
+        match client::get_last_height().await {
+            Ok(height) => return height,
             Err(err) => {
-                eprintln!("Error: {}", err);
+                error!("get_latest_height error: {}", err);
                 sleep(Duration::from_secs(5)).await;
             }
         }
     }
-
 }
 
-async fn get_next_block_number(init_latest_height: u32, db_client: &Client) -> Result<i64, Box<dyn Error>> {
+async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn Error>> {
     let mut local_latest_height = ANS_BLOCK_HEIGHT_START;
+    let db_client = DB_POOL.get().await?;
 
     let query = "select height from ans3.block order by height desc limit 1";
     let query = db_client.prepare(&query).await.unwrap();
@@ -231,7 +237,7 @@ async fn get_next_block_number(init_latest_height: u32, db_client: &Client) -> R
 
     let mut latest_height= init_latest_height;
     if local_latest_height >= init_latest_height as i64 {
-        latest_height = get_latest_height().await?;
+        latest_height = get_latest_height().await;
     }
 
     info!("Latest height: {}", latest_height);
@@ -244,29 +250,9 @@ async fn get_next_block_number(init_latest_height: u32, db_client: &Client) -> R
     Ok(height)
 }
 
-async fn connect_db() -> Result<Client, tokio_postgres::Error> {
-    let conn_str = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
-
-    loop {
-        match tokio_postgres::connect(&conn_str, NoTls).await {
-            Ok((client, connection)) => {
-                tokio::spawn(async move {
-                    if let Err(e) = connection.await {
-                        eprintln!("connection db err: {}", e)
-                    }
-                });
-                return Ok(client);
-            }
-            Err(err) => {
-                eprintln!("Error connecting to the database: {}", err);
-                sleep(Duration::from_secs(5)).await;
-            }
-        }
-    }
-}
-
-async fn index_data(block: &Block<N>, db_client: &mut Client) {
+async fn index_data(block: &Block<N>) {
     info!("Process block {} on {}", block.height(), block.timestamp());
+    let mut db_client = DB_POOL.get().await.unwrap();
     let db_trans = db_client.transaction().await.unwrap();
 
     db_trans.execute("INSERT INTO ans3.block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
