@@ -21,10 +21,7 @@ pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWit
     };
 
     let resolver: Option<String> = row.get(3);
-    let resolver = match resolver {
-        Some(resolver) => resolver,
-        None => "".to_string(),
-    };
+    let resolver = resolver.unwrap_or_else(|| "".to_string());
     
     let nft = NFTWithPrimary {
         name_hash: row.get(1),
@@ -58,10 +55,7 @@ pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWith
         };
 
         let resolver: Option<String> = row.get(5);
-        let resolver = match resolver {
-            Some(resolver) => resolver,
-            None => "".to_string(),
-        };
+        let resolver = resolver.unwrap_or_else(|| "".to_string());
         
         let nft = NFTWithPrimary {
             name_hash: row.get(1),
@@ -136,11 +130,7 @@ pub async fn get_subdomains_by_namehash(pool: &Pool, name_hash: &str) -> Result<
 
     for row in _rows {
         let address: Option<String> = row.get(3);
-        let address = match address {
-            Some(addr) => addr,
-            None => "".to_string(),
-        };
-
+        let address = address.unwrap_or_else(|| "".to_string());
 
         let r = NFT {
             name_hash: row.get(1),
@@ -182,7 +172,7 @@ pub async fn get_address_by_hash(pool: &Data<Pool>, name_hash: &String) -> Resul
     Ok(row.get(1))
 }
 
-pub(crate) async fn get_statistic_data(pool: &Data<Pool>) -> Result<AnsStatistic, Error>{
+pub(crate) async fn get_statistic_data(pool: &Pool) -> Result<AnsStatistic, Error>{
     let client = pool.get().await.unwrap();
     let cur_time = utils::get_current_timestamp();
     let time_24_before:i64 = (cur_time - 24 * 3600) as i64;
