@@ -287,8 +287,7 @@ async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path
 }
 
 #[get("/statistic")]
-async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: web::Data<deadpool_redis::Pool>) -> impl Responder {
-
+async fn statistic(redis_pool: web::Data<deadpool_redis::Pool>) -> impl Responder {
     let mut conn = redis_pool.get().await.unwrap();
     let cached_value: Option<String> = match cmd("GET").arg(&["cache:statistic"]).query_async(&mut conn).await {
         Ok(value) => value,
@@ -298,34 +297,7 @@ async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: web:
         let cached_data: AnsStatistic = serde_json::from_str(&value).expect("failed get cached data");
         return HttpResponse::Ok().json(cached_data);
     }
-
-    let statistic_data = db::get_statistic_data(&db_pool).await;
-    match statistic_data {
-        Ok(data) => {
-            let key = "cache:statistic";
-            let data_json = serde_json::to_string(&data).expect("Failed get statistic json");
-            let _: () = cmd("SET")
-                .arg(key)
-                .arg(data_json)
-                .query_async(&mut conn)
-                .await
-                .expect("Failed to set key-value");
-
-            // 设置过期时间
-            let _: () = cmd("EXPIRE")
-                .arg(key)
-                .arg(10)
-                .query_async(&mut conn)
-                .await
-                .expect("Failed to set expiration time");
-
-            HttpResponse::Ok().json(data)
-        }
-        Err(e) => {
-            eprintln!("statistic fail: {}", e);
-            HttpResponse::NotFound().finish()
-        },
-    }
+    HttpResponse::NotFound().finish()
 }
 
 #[actix_web::main]

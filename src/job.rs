@@ -3,20 +3,18 @@ use std::str::FromStr;
 use std::time::Duration;
 use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime as RedisRuntime};
 use deadpool_redis::redis::cmd;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tokio_postgres::NoTls;
-use tracing::info;
-use crate::client;
+use tracing::{error, info};
+use crate::{client, db};
 
 pub async fn run() {
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
     let redis_cfg = RedisConfig::from_url(redis_url);
     let redis_pool = redis_cfg.create_pool(Some(RedisRuntime::Tokio1)).unwrap();
 
-    // db config
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
     let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
-
     let mgr_config =deadpool_postgres::ManagerConfig {
         recycling_method: deadpool_postgres::RecyclingMethod::Fast
     };
@@ -24,14 +22,23 @@ pub async fn run() {
     let db_pool = deadpool_postgres::Pool::builder(db_mgr).max_size(2).build().unwrap();
 
     loop {
-        sleep(Duration::from_secs(30)).await;
+        job_get_statistic_data(&redis_pool, &db_pool).await;
+        sleep(Duration::from_secs(10)).await;
+        job_get_statistic_data(&redis_pool, &db_pool).await;
+
+        let timeout_duration = Duration::from_secs(10);
+        let job1 = timeout(timeout_duration, job_get_api_height(&redis_pool));
+        let job2 = timeout(timeout_duration, job_get_indexer_height(&redis_pool, &db_pool));
+        tokio::try_join!(job1, job2).expect("Failed to join jobs");
+
+        sleep(Duration::from_secs(10)).await;
+        job_get_statistic_data(&redis_pool, &db_pool).await;
+        sleep(Duration::from_secs(10)).await;
         info!("loop run jobs every 30 seconds");
-        job_get_api_height(&redis_pool).await;
-        job_get_db_height(&redis_pool, &db_pool).await;
     }
 }
 
-async fn job_get_db_height(redis_pool: &RedisPool, db_pool: &deadpool_postgres::Pool) {
+async fn job_get_indexer_height(redis_pool: &RedisPool, db_pool: &deadpool_postgres::Pool) {
     let client = db_pool.get().await.unwrap();
     let mut conn = redis_pool.get().await.unwrap();
 
@@ -58,5 +65,28 @@ async fn job_get_api_height(redis_pool: &RedisPool) {
             let _: () = cmd("SET").arg("cache:api_height").arg(height).query_async(&mut conn).await.expect("set api height fail");
         }
         _ => {}
+    }
+}
+
+async fn job_get_statistic_data(redis_pool: &RedisPool, db_pool: &deadpool_postgres::Pool) {
+    let mut conn = redis_pool.get().await.unwrap();
+
+    match db::get_statistic_data(db_pool).await {
+        Ok(data) => {
+            info!("job_get_statistic_data success!");
+            let key = "cache:statistic";
+            let data_json = serde_json::to_string(&data).expect("Failed get statistic json");
+            let _: () = cmd("SET").arg(key).arg(data_json)
+                .query_async(&mut conn).await
+                .expect("Failed to set key-value");
+
+            // 设置过期时间
+            let _: () = cmd("EXPIRE").arg(key).arg(3600)
+                .query_async(&mut conn).await
+                .expect("Failed to set expiration time");
+        }
+        Err(e) => {
+            error!("job_get_statistic_data fail: {}", e);
+        },
     }
 }
