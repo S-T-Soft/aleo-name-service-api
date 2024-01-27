@@ -19,7 +19,7 @@ use crate::client;
 type N = Testnet3;
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet3.blocks/phase3";
-const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org";
+const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org/v1";
 const ANS_BLOCK_HEIGHT_START: i64 = 649183;
 
 lazy_static! {
@@ -121,8 +121,8 @@ pub async fn sync_data() {
         });
 
         if block_number > -1 {
-            let url_pre = env::var("API_PREFIX").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
-            let url = format!("{}/v1/testnet3/block/{}", url_pre, block_number);
+            let url_pre = env::var("URL_HOST").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
+            let url = format!("{}/testnet3/block/{}", url_pre, block_number);
 
             match reqwest::get(&url).await {
                 Ok(response) => {
