@@ -5,7 +5,7 @@ use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime as RedisR
 use deadpool_redis::redis::cmd;
 use tokio::time::{sleep, timeout};
 use tokio_postgres::NoTls;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 use crate::{client, db};
 
 pub async fn run() {
@@ -26,10 +26,11 @@ pub async fn run() {
         sleep(Duration::from_secs(10)).await;
         job_get_statistic_data(&redis_pool, &db_pool).await;
 
-        let timeout_duration = Duration::from_secs(10);
+        let timeout_duration = Duration::from_secs(15);
         let job1 = timeout(timeout_duration, job_get_api_height(&redis_pool));
         let job2 = timeout(timeout_duration, job_get_indexer_height(&redis_pool, &db_pool));
-        if let Err(err) = tokio::try_join!(job1, job2) {
+        let job3 = timeout(timeout_duration, job_get_api_host(&redis_pool));
+        if let Err(err) = tokio::try_join!(job1, job2, job3) {
             warn!("fail join tasks!!! {}", err);
         }
 
@@ -39,6 +40,8 @@ pub async fn run() {
         info!("loop run jobs every 30 seconds");
     }
 }
+
+
 
 async fn job_get_indexer_height(redis_pool: &RedisPool, db_pool: &deadpool_postgres::Pool) {
     let client = db_pool.get().await.unwrap();
@@ -91,4 +94,44 @@ async fn job_get_statistic_data(redis_pool: &RedisPool, db_pool: &deadpool_postg
             error!("job_get_statistic_data fail: {}", e);
         },
     }
+}
+
+async fn job_get_api_host(redis_pool: &RedisPool) {
+    let api_hosts = env::var("URL_HOSTS").unwrap_or_else(|_| "".to_string());
+    if api_hosts.is_empty() {
+        return;
+    }
+    let mut max_height = 0;
+    let mut max_url = "".to_string();
+
+    for url in api_hosts.split(',') {
+        let height_resp = get_last_height(url).await;
+        match height_resp {
+            Ok(height) => {
+                if  height > 0 && height > max_height {
+                    max_height = height;
+                    max_url = url.to_string();
+                }
+            }
+            Err(_) => {
+                warn!("job_get_api_host:get_last_height fail {}", url)
+            }
+        }
+    }
+    if max_height > 0 && !max_url.is_empty() {
+        env::set_var("URL_HOST", &max_url);
+        let mut conn = redis_pool.get().await.unwrap();
+        let _: () = cmd("SET").arg("cache:api_host").arg(&max_url).query_async(&mut conn).await.expect("Failed to set api_host");
+        info!("job_get_api_host success : {}", &max_url);
+    }
+
+}
+
+
+#[instrument]
+pub async fn get_last_height(api_host: &str) -> Result<u32, String> {
+    let url = format!("{}/testnet3/block/height/latest", api_host);
+    let resp = client::call_api(url).await?;
+    let height: u32 = resp.parse().unwrap_or_else(|_| 0);
+    Ok( height)
 }

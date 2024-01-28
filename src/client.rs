@@ -1,10 +1,12 @@
 use reqwest;
 use std::env;
+use std::time::Duration;
 use regex::Regex;
 use serde::Deserialize;
 // use urlencoding;
 use crate::utils;
 use deadpool_redis::{Pool, redis::{cmd}};
+use reqwest::Client;
 // use actix_web::web::Data;
 use tracing::{info, instrument, warn};
 
@@ -22,9 +24,13 @@ fn get_base_uri() -> String {
     base_uri
 }
 
-async fn call_api(url: String) -> Result<String, String> {
+pub(crate) async fn call_api(url: String) -> Result<String, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5)) // 设置超时时间为 5 秒
+        .build()
+        .unwrap();
     // Make the request
-    let resp = reqwest::get(&url).await;
+    let resp = client.get(&url).send().await;
 
     // Check if the request was successful
     let resp = match resp {
