@@ -51,12 +51,17 @@ This API endpoint accepts a path parameter `name` and returns List subdomains
 This API endpoint accepts a path parameter `name` and returns List ResolverContent
 
 ### 8. `GET /api/v1/token/{name_hash}`
-### 9. `GET /api/v1/token/{name_hash}.png`
+This API endpoint accepts a path parameter `name_hash` and returns token
+
+### 9. `GET /api/v1/token/{name_hash}.svg`
+This API endpoint accepts a path parameter `name_hash` and returns an avatar for a name hash 
 
 ### 10. `GET /api/v1/statistic`
+This API endpoint return the server statuses
 ```json
 {
   "cal_time": 1701796297,
+  "block_height": 1264452,
   "total_names_24h": 163,
   "total_names": 2226,
   "total_pri_names": 1298,
@@ -66,10 +71,19 @@ This API endpoint accepts a path parameter `name` and returns List ResolverConte
 
 ## Running the server
 
+### Local host
+Start PostgresQL with init.sql and Redis before running the program.
 To start the server in local, run the following command:
 
 ```bash
+export REDIS_URL=redis://locahost:6379/0
+export DATABASE_URL=postgresql://user:pwd@locahost:5432/ans
 cargo run
+```
+
+### With docker-compose
+```bash
+docker-compose up
 ```
 
 The server will start on localhost port 8080.

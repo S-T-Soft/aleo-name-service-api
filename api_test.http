@@ -1,7 +1,7 @@
 GET http://0.0.0.0:8080/metrics
 Authorization: bear: ans_token_xxx
 
-###
+### statistic
 GET http://0.0.0.0:8080/statistic
 Accept: application/json
 
@@ -20,10 +20,6 @@ Accept: application/json
 GET http://0.0.0.0:8080/address/snowtiger.ans
 Accept: application/json
 
-
-###
-GET http://10.0.0.31:8080/address/killboy.ans
-Accept: application/json
 
 ###
 GET http://0.0.0.0:8080/address/265326.ans
@@ -58,12 +54,12 @@ GET http://0.0.0.0:8080/token/40391659895422262922170593064956712592644482136020
 Accept: application/json
 
 ### 两行name img
-GET http://0.0.0.0:8080/token/6047113683417128134228138504960269649446052494009709150885104317487227349902field.svg
+GET http://0.0.0.0:8080/token/4039165989542226292217059306495671259264448213602066982803038338315267964460field.svg
 Accept: application/json
 
 
 ### 一行name img
-GET http://0.0.0.0:9007/token/4039165989542226292217059306495671259264448213602066982803038338315267964460field.svg
+GET http://0.0.0.0:8080/token/6331364981869518851518415435503630680828144854671958713840444674116320413200field.svg
 Accept: application/json
 
 
