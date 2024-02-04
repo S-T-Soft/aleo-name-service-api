@@ -4,7 +4,7 @@ This project exposes several API endpoints for the purposes of name-to-hash conv
 
 ## API Endpoints
 
-### 1. `GET /api/v1/name_to_hash/{name}`
+### 1. `GET /name_to_hash/{name}`
 
 This API endpoint accepts a path parameter `name` and returns a `NameHash` object.
 
@@ -12,7 +12,7 @@ This API endpoint accepts a path parameter `name` and returns a `NameHash` objec
 - **Success Response:** `200 OK` with JSON body: `{ "name_hash": "<name_hash>", "name": "<name>" }`
 - **Error Response:** `500 Internal Server Error` with JSON body: `{ "error": "Error parsing name: <error>" }`
 
-### 2. `GET /api/v1/primary_name/{address}`
+### 2. `GET /primary_name/{address}`
 
 This API endpoint accepts a path parameter `address` and returns an `AddressName` object.
 
@@ -20,7 +20,7 @@ This API endpoint accepts a path parameter `address` and returns an `AddressName
 - **Success Response:** `200 OK` with JSON body: `{ "address": "<address>", "name": "<name>" }`
 - **Error Response:** `404 Not Found`
 
-### 3. `GET /api/v1/address/{name}`
+### 3. `GET /address/{name}`
 
 This API endpoint accepts a path parameter `name` and returns an `AddressName` object.
 
@@ -28,7 +28,7 @@ This API endpoint accepts a path parameter `name` and returns an `AddressName` o
 - **Success Response:** `200 OK` with JSON body: `{ "address": "<address>", "name": "<name>" }`
 - **Error Response:** `404 Not Found`
 
-### 4. `GET /api/v1/resolver`
+### 4. `GET /resolver`
 
 This API endpoint accepts query parameters `name` and `category` and returns a `ResolverContent` object.
 
@@ -36,7 +36,7 @@ This API endpoint accepts query parameters `name` and `category` and returns a `
 - **Success Response:** `200 OK` with JSON body: `{ "content": "<content>", "name": "<name>", "category": "<category>" }`
 - **Error Response:** `404 Not Found`
 
-### 5. `GET /api/v1/public_ans/{address}`
+### 5. `GET /public_ans/{address}`
 
 This API endpoint accepts a path parameter `address` and returns `Vec<NFTWithPrimary>` object.
 
@@ -44,19 +44,19 @@ This API endpoint accepts a path parameter `address` and returns `Vec<NFTWithPri
 - **Success Response:** `200 OK` with JSON body: `{ "address": "<address>", "name": "<name>", "name_hash": "<name_hash>", "is_primary_name": "<is_primary_name>", "resolver": "<resolver>" }`
 - **Error Response:** `404 Not Found`
 
-### 6. `GET /api/v1/subdomain/{name}`
+### 6. `GET /subdomain/{name}`
 This API endpoint accepts a path parameter `name` and returns List subdomains
 
-### 7. `GET /api/v1/resolver/{name}`
+### 7. `GET /resolver/{name}`
 This API endpoint accepts a path parameter `name` and returns List ResolverContent
 
-### 8. `GET /api/v1/token/{name_hash}`
+### 8. `GET /token/{name_hash}`
 This API endpoint accepts a path parameter `name_hash` and returns token
 
-### 9. `GET /api/v1/token/{name_hash}.svg`
+### 9. `GET /token/{name_hash}.svg`
 This API endpoint accepts a path parameter `name_hash` and returns an avatar for a name hash 
 
-### 10. `GET /api/v1/statistic`
+### 10. `GET /statistic`
 This API endpoint return the server statuses
 ```json
 {
