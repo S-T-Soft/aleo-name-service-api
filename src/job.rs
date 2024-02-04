@@ -49,11 +49,16 @@ async fn job_get_indexer_height(redis_pool: &RedisPool, db_pool: &deadpool_postg
 
     let query = "select height from ans3.block order by height desc limit 1";
     let query = client.prepare(&query).await.unwrap();
-    let row = client.query_one(&query, &[]).await.unwrap();
-    if !row.is_empty() {
-        let height:i64 = row.get(0);
-        info!("set indexer:height: {}", height);
-        let _: () = cmd("SET").arg("indexer:height").arg(height).query_async(&mut conn).await.expect("set indexer height fail");
+    let row = client.query_one(&query, &[]).await;
+    match row {
+        Ok(row) => {
+            if !row.is_empty() {
+                let height:i64 = row.get(0);
+                info!("set indexer:api_height: {}", height);
+                let _: () = cmd("SET").arg("indexer:height").arg(height).query_async(&mut conn).await.expect("set indexer height fail");
+            }
+        }
+        Err(_) => {}
     }
 }
 

@@ -5,6 +5,7 @@ WORKDIR /usr/src/ans_api
 
 COPY . .
 
+RUN apt-get update && apt-get install -y libclang-dev
 RUN cargo install --path .
 
 # stage 2
