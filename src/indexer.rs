@@ -149,9 +149,18 @@ async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
         }
     };
 
+    // get latest height from CDN
+    let latest_cdn_height = match client::get_cdn_last_height().await {
+        Ok(height) => height,
+        Err(err) => {
+            error!("get_latest_height error: {}", err);
+            init_latest_height
+        }
+    };
+
     // local block height
     let start = block_number as u32;
-    let end = init_latest_height;
+    let end = std::cmp::min(latest_cdn_height, init_latest_height);
     let total_blocks = end.saturating_sub(start);
 
     info!("Sync {total_blocks} blocks from CDN (0% complete)...");

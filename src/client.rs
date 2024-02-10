@@ -221,6 +221,15 @@ pub async fn get_last_height() -> Result<u32, String> {
 }
 
 
+pub async fn get_cdn_last_height() -> Result<u32, String> {
+    let url_host = env::var("ALEO_HEALTHCHECK_HOST").unwrap_or_else(|_| "https://healthcheck.aleo.org/".to_string());
+    let url = format!("{}/testnet3/fastsync/latestHeight", url_host);
+    let resp = call_api(url).await?;
+    let height: u32 = resp.parse().unwrap_or_else(|_| 0);
+    Ok( height)
+}
+
+
 pub(crate) async fn is_n_query_from_api(redis_pool: &Pool) -> bool {
     let mut conn = redis_pool.get().await.unwrap();
     let indexer_height: u32 = cmd("GET").arg(&["indexer:height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
