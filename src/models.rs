@@ -14,6 +14,13 @@ pub struct NameHash {
 }
 
 #[derive(Serialize)]
+pub struct NameHashBalance {
+    pub name_hash: String,
+    pub name: String,
+    pub balance: i64,
+}
+
+#[derive(Serialize)]
 pub struct Resolver {
     pub name_hash: String,
     pub category: String,
@@ -80,5 +87,6 @@ pub struct NFTWithPrimary {
     pub name: String,
     pub is_primary_name: bool,
     pub resolver: String,
+    pub balance: i64,
 }
 

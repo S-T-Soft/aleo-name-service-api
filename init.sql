@@ -32,6 +32,7 @@ create table ans3.ans_name
 (
     id         bigserial,
     name_hash  text          not null,
+    transfer_key text,
     parent     text,
     name       text          not null,
     full_name  text          not null,
@@ -80,4 +81,16 @@ create table ans3.ans_name_version
     transition_id text,
     constraint version_name_hash_pk
         unique (name_hash)
+);
+
+create table ans3.domain_credits
+(
+    id         bigserial,
+    transfer_key  text      not null,
+    amount    bigint default 0 not null,
+    block_height   bigint,
+    transaction_id text,
+    transition_id text,
+    constraint transfer_key_pk
+        unique (transfer_key)
 );

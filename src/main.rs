@@ -46,7 +46,7 @@ async fn name_to_hash(name: web::Path<String>) -> impl Responder {
         }
     };
 
-    HttpResponse::Ok().json(NameHash { name_hash, name, })
+    HttpResponse::Ok().json(NameHash { name_hash, name })
 }
 
 #[get("/hash_to_name/{name_hash}")]
@@ -55,7 +55,11 @@ async fn hash_to_name(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: we
     let nft = db::get_name_by_namehash(&db_pool, &name_hash).await;
 
     match nft {
-        Ok(data) => HttpResponse::Ok().json(NameHash {name_hash: data.name_hash, name: data.name}),
+        Ok(data) => HttpResponse::Ok().json(NameHashBalance {
+            name_hash: data.name_hash,
+            name: data.name,
+            balance: data.balance,
+        }),
         Err(_e) => HttpResponse::NotFound().finish(),
     }
 }
@@ -364,8 +368,6 @@ async fn main() -> std::io::Result<()> {
             .service(token_png)
             .service(token)
             .service(statistic)
-
-            
     })
     .bind("0.0.0.0:8080")?
     .run()

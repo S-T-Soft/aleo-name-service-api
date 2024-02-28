@@ -14,7 +14,7 @@ use snarkvm_console_program::{Field, Address, Identifier, FromField, Argument, F
 use snarkvm_ledger_block::{Transition};
 use tokio_postgres::NoTls;
 use tracing::{error, info, warn};
-use crate::client;
+use crate::{client, utils};
 
 type N = Testnet3;
 static MAX_BLOCK_RANGE: u32 = 50;
@@ -82,6 +82,23 @@ lazy_static! {
     static ref BURN_FIELD: Field<N> = Field::<N>::from_bits_le(&"burn".as_bytes().to_bits_le())
         .expect("Failed to create Field from bits");
     static ref BURN: Identifier<N> = Identifier::<N>::from_field(&*BURN_FIELD)
+        .expect("Failed to create Identifier from Field");
+
+    static ref TRANSFER_PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"ans_credit_transfer_v5".as_bytes().to_bits_le())
+        .expect("Failed to create Field from bits");
+    static ref TRANSFER_PROGRAM_ID: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_PROGRAM_ID_FIELD)
+        .expect("Failed to create Identifier from Field");
+    static ref TRANSFER_CREDITS_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_credits".as_bytes().to_bits_le())
+        .expect("Failed to create Field from bits");
+    static ref TRANSFER_CREDITS: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_CREDITS_FIELD)
+        .expect("Failed to create Identifier from Field");
+    static ref CLAIM_CREDITS_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"claim_credits_public".as_bytes().to_bits_le())
+        .expect("Failed to create Field from bits");
+    static ref CLAIM_CREDITS_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*CLAIM_CREDITS_PUBLIC_FIELD)
+        .expect("Failed to create Identifier from Field");
+    static ref CLAIM_CREDITS_PRIVATE_FIELD: Field<N> = Field::<N>::from_bits_le(&"claim_credits_private".as_bytes().to_bits_le())
+        .expect("Failed to create Field from bits");
+    static ref CLAIM_CREDITS_PRIVATE: Identifier<N> = Identifier::<N>::from_field(&*CLAIM_CREDITS_PRIVATE_FIELD)
         .expect("Failed to create Identifier from Field");
 
     // db config
@@ -290,6 +307,15 @@ async fn index_data(block: &Block<N>) {
                         _ => {}
                     }
                 }
+                else if transition.program_id().name() == &*TRANSFER_PROGRAM_ID {
+                    info!("process transition {}, function name: {}", transition.id(), transition.function_name());
+                    match transition.function_name() {
+                        name if name == &*TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -314,6 +340,7 @@ async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, 
         let name = parse_str_4u128(name_arg).unwrap();
         let parent: String = parse_field(parent_arg).unwrap();
         let resolver = parse_str_u128(resolver_arg).unwrap();
+        let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
         let mut full_name = name.clone();
 
         let query = "SELECT full_name FROM ans3.ans_name WHERE name_hash=$1 limit 1";
@@ -324,9 +351,9 @@ async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, 
             full_name = name.clone() + &".".to_string() + parent_full_name;
         }
 
-        db_trans.execute("INSERT INTO ans3.ans_name (name_hash, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8) ON CONFLICT (name_hash) DO NOTHING",
-                         &[&name_hash, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        db_trans.execute("INSERT INTO ans3.ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8, $9) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &transfer_key, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         info!("register: {} {} {} {} {}", name, parent, name_hash, full_name, resolver)
@@ -349,10 +376,11 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
         let registrar: String = parse_address(registrar_arg).unwrap();
         let name_hash: String = parse_field(name_hash_arg).unwrap();
         let name = parse_str_4u128(name_arg).unwrap();
+        let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
 
-        db_trans.execute("INSERT INTO ans3.ans_name (name_hash, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8) ON CONFLICT (name_hash) DO NOTHING",
-                         &[&name_hash, &name, &"0field".to_string(), &"".to_string(), &name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        db_trans.execute("INSERT INTO ans3.ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8, $9) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &transfer_key, &name, &"0field".to_string(), &"".to_string(), &name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
         db_trans.execute("INSERT INTO ans3.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",
@@ -622,6 +650,49 @@ async fn burn(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, tran
     };
 }
 
+async fn transfer_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
+        let amount_arg = args.get(args.len() - 1).unwrap();
+
+        let transfer_key: String = parse_address(transfer_key_arg).unwrap();
+        let amount: u64 = parse_u64(amount_arg).unwrap();
+
+        db_trans.execute("INSERT INTO ans3.domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = ans3.domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
+                         &[&transfer_key, &(amount as i64), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+    } else {
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
+    };
+}
+
+async fn claim_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
+        let amount_arg = args.get(args.len() - 1).unwrap();
+
+        let transfer_key: String = parse_address(transfer_key_arg).unwrap();
+        let amount: u64 = parse_u64(amount_arg).unwrap();
+
+        db_trans.execute("UPDATE ans3.domain_credits SET amount = ans3.domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
+                         &[&transfer_key, &(amount as i64), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+    } else {
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
+    };
+}
+
 // parse argument
 fn parse_str_4u128(name_arg: &Argument<N>) -> Result<String, String> {
     let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
@@ -676,6 +747,17 @@ fn parse_address(address_arg: &Argument<N>) -> Result<String, String> {
     if address_arg_bytes.len() >= 32 {
         let last_32: &[u8] = &address_arg_bytes[address_arg_bytes.len() - 32..];
         Ok(format!("{}", Address::<N>::from_bytes_le(last_32).unwrap()))
+    } else {
+        Err("e".to_string())
+    }
+}
+
+fn parse_u64(u64_arg: &Argument<N>) -> Result<u64, String> {
+    let u64_arg_bytes = Argument::to_bytes_le(u64_arg).unwrap();
+
+    if u64_arg_bytes.len() >= 8 {
+        let last_8: &[u8] = &u64_arg_bytes[u64_arg_bytes.len() - 8..];
+        Ok(u64::from_le_bytes(last_8.try_into().unwrap()))
     } else {
         Err("e".to_string())
     }

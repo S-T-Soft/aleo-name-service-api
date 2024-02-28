@@ -1,16 +1,19 @@
 use actix_web::web::Data;
 use deadpool_postgres::Pool;
 use tokio_postgres::Error;
-use tracing::info;
+use tracing::debug;
 use crate::models::*;
 use crate::utils;
+
 pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWithPrimary, Error> {
     let client = pool.get().await.unwrap();
-    let query = "select an.id, an.name_hash, an.full_name, an.resolver, ap.id from ans3.ans_name AS an
+    let query = "select an.id, an.name_hash, an.full_name, an.resolver, ap.id, dc.amount
+            FROM ans3.ans_name AS an
             LEFT JOIN ans3.ans_primary_name as ap ON an.name_hash = ap.name_hash
+            LEFT JOIN ans3.domain_credits as dc ON an.transfer_key = dc.transfer_key
             WHERE an.name_hash = $1 limit 1";
 
-    info!("get_name_by_namehash query db: {} params {}", &query, name_hash);
+    debug!("get_name_by_namehash query db: {} params {}", &query, name_hash);
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[&name_hash]).await?;
 
@@ -22,6 +25,9 @@ pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWit
 
     let resolver: Option<String> = row.get(3);
     let resolver = resolver.unwrap_or_else(|| "".to_string());
+
+    let balance: Option<i64> = row.get(5);
+    let balance = balance.unwrap_or_else(|| 0i64);
     
     let nft = NFTWithPrimary {
         name_hash: row.get(1),
@@ -29,6 +35,7 @@ pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWit
         name: row.get(2),
         is_primary_name,
         resolver,
+        balance,
     };
 
     Ok(nft)
@@ -36,12 +43,14 @@ pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWit
 
 pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWithPrimary>, Error> {
     let client = pool.get().await.unwrap();
-    let query = "select ao.id, ao.name_hash, ao.address, an.full_name, ap.id, an.resolver from ans3.ans_nft_owner as ao
+    let query = "select ao.id, ao.name_hash, ao.address, an.full_name, ap.id, an.resolver, dc.amount
+            FROM ans3.ans_nft_owner as ao
             JOIN ans3.ans_name as an ON ao.name_hash = an.name_hash
             LEFT JOIN ans3.ans_primary_name as ap ON ao.name_hash = ap.name_hash
+            LEFT JOIN ans3.domain_credits as dc ON an.transfer_key = dc.transfer_key
             where ao.address = $1";
     
-    info!("get_names_by_addr query db: {} params {}", query, &address);
+    debug!("get_names_by_addr query db: {} params {}", query, &address);
     let query = client.prepare(&query).await.unwrap();
     let _rows = client.query(&query, &[&address]).await?;
 
@@ -56,6 +65,9 @@ pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWith
 
         let resolver: Option<String> = row.get(5);
         let resolver = resolver.unwrap_or_else(|| "".to_string());
+
+        let balance: Option<i64> = row.get(6);
+        let balance = balance.unwrap_or_else(|| 0i64);
         
         let nft = NFTWithPrimary {
             name_hash: row.get(1),
@@ -63,6 +75,7 @@ pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWith
             name: row.get(3),
             is_primary_name: is_primary,
             resolver,
+            balance,
         };
         nft_list.push(nft);
     }
@@ -76,7 +89,7 @@ pub async fn get_resolvers_by_namehash(pool: &Pool, name_hash: &str) -> Result<V
     let query = "select ar.id, ar.category, ar.version, ar.name from ans3.ans_resolver As ar
         LEFT JOIN ans3.ans_name_version as av ON ar.name_hash = av.name_hash
         WHERE (ar.version=av.version or av.version is null) and ar.name_hash = $1";
-    info!("get_resolvers_by_namehash query db: {} params {}", &query, &name_hash);
+    debug!("get_resolvers_by_namehash query db: {} params {}", &query, &name_hash);
     let query = client.prepare(&query).await.unwrap();
     let _rows = client.query(&query, &[&name_hash]).await?;
 
@@ -101,7 +114,7 @@ pub async fn get_resolver(pool: &Pool, name_hash: &str, category: &str) -> Resul
     let query = "select ar.id, ar.category, ar.version, ar.name from ans3.ans_resolver As ar
         LEFT JOIN ans3.ans_name_version as av ON ar.name_hash = av.name_hash
         WHERE (ar.version=av.version or av.version is null) and ar.name_hash = $1 and ar.category = $2 limit 1";
-    info!("get_resolvers_by_namehash query db: {} name_hash {}, category {}", &query, &name_hash, &category);
+    debug!("get_resolvers_by_namehash query db: {} name_hash {}, category {}", &query, &name_hash, &category);
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[&name_hash, &category]).await?;
     
@@ -122,7 +135,7 @@ pub async fn get_subdomains_by_namehash(pool: &Pool, name_hash: &str) -> Result<
     let query = "select an.id, an.name_hash, an.name, ao.address from ans3.ans_name as an
             LEFT JOIN ans3.ans_nft_owner as ao ON an.name_hash = ao.name_hash
                 WHERE parent = $1";
-    info!("get_subdomains_by_namehash query db: {} param {}", &query, &name_hash);
+    debug!("get_subdomains_by_namehash query db: {} param {}", &query, &name_hash);
     let query = client.prepare(&query).await.unwrap();
     let _rows = client.query(&query, &[&name_hash]).await?;
 
@@ -150,7 +163,7 @@ pub async fn get_primary_name_by_address(pool: &Data<Pool>, address: &String) ->
         LEFT JOIN ans3.ans_name as an ON ap.name_hash = an.name_hash
         WHERE ap.address = $1 limit 1";
 
-    info!("get_primary_name_by_address query db: {} address {}", &query, &address);
+    debug!("get_primary_name_by_address query db: {} address {}", &query, &address);
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[&address]).await?;
     Ok(row.get(1))

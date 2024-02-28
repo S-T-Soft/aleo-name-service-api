@@ -222,7 +222,7 @@ pub async fn get_last_height() -> Result<u32, String> {
 
 
 pub async fn get_cdn_last_height() -> Result<u32, String> {
-    let url_host = env::var("ALEO_HEALTHCHECK_HOST").unwrap_or_else(|_| "https://healthcheck.aleo.org/".to_string());
+    let url_host = env::var("ALEO_HEALTHCHECK_HOST").unwrap_or_else(|_| "https://healthcheck.aleo.org".to_string());
     let url = format!("{}/testnet3/fastsync/latestHeight", url_host);
     let resp = call_api(url).await?;
     let height: u32 = resp.parse().unwrap_or_else(|_| 0);

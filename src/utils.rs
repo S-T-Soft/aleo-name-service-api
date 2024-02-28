@@ -1,12 +1,17 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::cmp::min;
-use snarkvm_console_program::{Field, Value};
+use std::str::FromStr;
+use lazy_static::lazy_static;
+use snarkvm_console_program::{Field, ToBits, Value};
 use snarkvm_console_network::prelude::Zero;
 use snarkvm_console_network::{Network, Testnet3, ToFields};
 use tracing::info;
 
 type N = Testnet3;
 
+lazy_static! {
+    static ref EMPTY_U128_ARR: Vec<Field<N>> = Value::<N>::try_from("[0u128, 0u128, 0u128, 0u128]").unwrap().to_fields().unwrap();
+}
 
 // pub fn string_to_u128(s: &str) -> Result<u128, String> {
 //     // Check if all characters are valid
@@ -86,9 +91,19 @@ pub fn parse_name_hash(name: &str) -> Result<Field<N>, String> {
         let avalue = label.to_fields().map_err(|e| e.to_string())?;
         name_hash = N::hash_psd2(&avalue).map_err(|e| e.to_string())?;
     }
-    //let name_hash = Field::<N>::size_in_bits().to_string();
-    //let name_hash = Field::<N>::from_str(&name_hash).map_err(|e| e.to_string())?;
     Ok(name_hash)
+}
+
+
+// Calc a name transfer key
+pub fn get_name_transfer_key(name: &str) -> Result<Field<N>, String> {
+    Ok(get_name_hash_transfer_key(&parse_name_hash(name)?.to_string())?)
+}
+
+pub fn get_name_hash_transfer_key(name_hash: &str) -> Result<Field<N>, String> {
+    let salt = N::hash_to_scalar_psd2(&EMPTY_U128_ARR).unwrap();
+    let name_hash = Value::<N>::from_str(&name_hash).unwrap();
+    Ok(N::commit_bhp256(&name_hash.to_bits_le(), &salt).unwrap())
 }
 
 
@@ -121,4 +136,19 @@ pub fn get_current_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("Failed to get current timestamp")
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_name_transfer_key_valid() {
+        let name = "12359.ans";
+        let expected = "6034886039242676076581043046454541166212927883536180193267871895718306010429field";
+        match get_name_transfer_key(&name) {
+            Ok(value) => assert_eq!(value.to_string(), expected, "key not equal"),
+            Err(e) => assert!(false, "Expected Ok, got Err {}", e),
+        }
+    }
 }
