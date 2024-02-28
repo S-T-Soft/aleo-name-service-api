@@ -762,3 +762,27 @@ fn parse_u64(u64_arg: &Argument<N>) -> Result<u64, String> {
         Err("e".to_string())
     }
 }
+
+// generate tests
+#[cfg(test)]
+mod tests {
+    use snarkvm_console_program::{Plaintext, Value};
+    use snarkvm_console_network::{FromFields, ToFields};
+    use super::*;
+
+    #[test]
+    fn test_parse_u64() {
+        let u64_val = Value::<N>::from_str("100u64").unwrap();
+        let u64_arg = Argument::<N>::Plaintext(Plaintext::<N>::from_fields(&u64_val.to_fields().unwrap()).unwrap());
+        let result = parse_u64(&u64_arg);
+        assert_eq!(result, Ok(100));
+    }
+
+    #[test]
+    fn test_parse_address() {
+        let address_val = Value::<N>::from_str("aleo1q6qstg8q8shwqf5m6q5fcenuwsdqsvp4hhsgfnx5chzjm3secyzqt9mxm8").unwrap();
+        let address_arg = Argument::<N>::Plaintext(Plaintext::<N>::from_fields(&address_val.to_fields().unwrap()).unwrap());
+        let result = parse_address(&address_arg);
+        assert_eq!(result, Ok("aleo1q6qstg8q8shwqf5m6q5fcenuwsdqsvp4hhsgfnx5chzjm3secyzqt9mxm8".to_string()));
+    }
+}
