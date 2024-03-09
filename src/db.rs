@@ -268,7 +268,7 @@ pub(crate) async fn set_kv_value(pool: &Pool, key: &str, value: &str) {
 
     let current_time = SystemTime::now();
     let timestamp = current_time.duration_since(UNIX_EPOCH).expect("Failed to get timestamp");
-    let current_ts = timestamp.as_secs() as u32;
+    let current_ts = timestamp.as_secs() as i64;
 
     client.execute("INSERT INTO ans3.kv (key, value) \
                              VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated = $3",

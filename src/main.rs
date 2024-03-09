@@ -10,8 +10,13 @@ use actix_web_prom::PrometheusMetricsBuilder;
 use base64::encode;
 use reqwest::StatusCode;
 use actix_governor::{Governor, GovernorConfigBuilder};
+use dotenv::dotenv;
 use tracing::{info, warn};
-use tracing_subscriber::{EnvFilter, fmt, Registry};
+use tracing_appender::{non_blocking, rolling};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::{EnvFilter, fmt};
+
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -303,7 +308,9 @@ async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>) -> impl Responde
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    init_tracing();
+    dotenv().ok();
+    let _guards = init_tracing();
+    info!("xxx");
 
     // db config
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
@@ -366,8 +373,26 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
-fn init_tracing() {
+fn init_tracing() -> WorkerGuard {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let formatting_layer = fmt::layer().with_writer(std::io::stderr);
-    Registry::default().with(env_filter).with(formatting_layer).init();
+
+    let file_appender = rolling::daily("logs", "app.log");
+    let (non_blocking_appender, guard) = non_blocking(file_appender);
+    let file_layer = fmt::layer()
+        .with_ansi(false)
+        .with_writer(non_blocking_appender);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(ErrorLayer::default())
+        .with(formatting_layer)
+        .with(file_layer);
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Unable to set a global subscriber");
+
+    color_eyre::install().expect("color_eyre error");
+    info!("logging init finish!");
+    guard
 }
