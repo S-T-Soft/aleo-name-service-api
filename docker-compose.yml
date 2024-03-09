@@ -18,14 +18,6 @@ services:
       - ./.db:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
-  redis:
-    image: redis:alpine
-    restart: always
-    volumes:
-      - ./.redis:/data
-    ports:
-      - "6379:6379"
-
   api:
     build:
       context: ./
@@ -36,7 +28,6 @@ services:
     environment:
       URL_HOST: https://api.explorer.aleo.org/v1
       PROGRAM: aleo_name_service_registry_v1.aleo
-      REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql://ansUsr:ansPwd@postgresql:5432/ans
       VIRTUAL_HOST: api.aleonames.local
       LOG_STORE: ans

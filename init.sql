@@ -94,3 +94,14 @@ create table ans3.domain_credits
     constraint transfer_key_pk
         unique (transfer_key)
 );
+
+create table ans3.kv
+(
+    key    text,
+    value  text,
+    created       bigint DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT,
+    updated       bigint DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT,
+
+    constraint kv_key_pk
+        unique (key)
+);

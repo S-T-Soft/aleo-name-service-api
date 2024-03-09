@@ -2,14 +2,12 @@ use actix_web::{App, get, HttpResponse, HttpServer, Responder, web};
 use actix_cors::Cors;
 use serde::Deserialize;
 use serde_json;
-use deadpool_redis::{Config as RedisConfig, Runtime as RedisRuntime};
 use snarkvm_console_program::FromStr;
 use tokio_postgres::NoTls;
 use std::env;
 use std::net::IpAddr;
 use actix_web_prom::PrometheusMetricsBuilder;
 use base64::encode;
-use deadpool_redis::redis::cmd;
 use reqwest::StatusCode;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use tracing::{info, warn};
@@ -76,13 +74,13 @@ async fn name_api(db_pool: web::Data<deadpool_postgres::Pool>, address: web::Pat
 }
 
 #[get("/address/{name}")]
-async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: web::Data<deadpool_redis::Pool>, name: web::Path<String>) -> impl Responder {
+async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Path<String>) -> impl Responder {
     let name = name.into_inner();
     let name_hash = db::get_hash_by_name(&db_pool, &name).await;
     let name_hash = match name_hash {
         Ok(_hash) => _hash,
         Err(_e) => {
-            if client::is_n_query_from_api(&redis_pool).await {
+            if db::is_n_query_from_api(&db_pool).await {
                 match client::check_name_hash(&name).await {
                     Ok(v) => v.to_string(),
                     Err(_) => "".to_string()
@@ -100,7 +98,7 @@ async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, redis_pool: we
     match address.await {
         Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
         Err(_e) => {
-            if client::is_n_query_from_api(&redis_pool).await {
+            if db::is_n_query_from_api(&db_pool).await {
                 return match client::get_owner(&name_hash).await {
                     Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
                     Err(_) => HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() })
@@ -291,26 +289,21 @@ async fn token(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: web::Path
 }
 
 #[get("/statistic")]
-async fn statistic(redis_pool: web::Data<deadpool_redis::Pool>) -> impl Responder {
-    let mut conn = redis_pool.get().await.unwrap();
-    let cached_value: Option<String> = match cmd("GET").arg(&["cache:statistic"]).query_async(&mut conn).await {
-        Ok(value) => value,
-        Err(_) => None
-    };
-    if let Some(value) = cached_value {
-        let cached_data: AnsStatistic = serde_json::from_str(&value).expect("failed get cached data");
-        return HttpResponse::Ok().json(cached_data);
+async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>) -> impl Responder {
+
+    let cached_value = db::get_kv_value(&db_pool, "api_statistic").await;
+    match cached_value {
+        Ok(value) => {
+            let cached_data: AnsStatistic = serde_json::from_str(&value).expect("failed get cached data");
+            return HttpResponse::Ok().json(cached_data);
+        }
+        Err(_) => HttpResponse::NotFound().finish()
     }
-    HttpResponse::NotFound().finish()
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     init_tracing();
-
-    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/0".to_string());
-    let redis_cfg = RedisConfig::from_url(redis_url);
-    let redis_pool = redis_cfg.create_pool(Some(RedisRuntime::Tokio1)).unwrap();
 
     // db config
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
@@ -355,7 +348,6 @@ async fn main() -> std::io::Result<()> {
             .wrap(auth::Authentication)
             .wrap(Governor::new(&governor_conf))
             .app_data(web::Data::new(IpAddr::from_str(&trusted_reverse_proxy_ip).unwrap()))
-            .app_data(web::Data::new(redis_pool.clone()))
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)
             .service(hash_to_name)
