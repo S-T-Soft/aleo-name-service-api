@@ -658,7 +658,7 @@ async fn transfer_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
         let transfer_key_arg = args.get(args.len()  - 2).unwrap();
         let amount_arg = args.get(args.len() - 1).unwrap();
 
-        let transfer_key: String = parse_address(transfer_key_arg).unwrap();
+        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
         let amount: u64 = parse_u64(amount_arg).unwrap();
 
         db_trans.execute("INSERT INTO ans3.domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
