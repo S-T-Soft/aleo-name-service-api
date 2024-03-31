@@ -680,7 +680,7 @@ async fn claim_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block
         let transfer_key_arg = args.get(args.len()  - 2).unwrap();
         let amount_arg = args.get(args.len() - 1).unwrap();
 
-        let transfer_key: String = parse_address(transfer_key_arg).unwrap();
+        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
         let amount: u64 = parse_u64(amount_arg).unwrap();
 
         db_trans.execute("UPDATE ans3.domain_credits SET amount = ans3.domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
