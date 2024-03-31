@@ -131,6 +131,8 @@ pub async fn sync_data() {
         _ => {}
     }
 
+    fix_transfer_key().await;
+
     loop {
         let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
             eprintln!("Error fetching next block number: {}", e);
@@ -154,6 +156,22 @@ pub async fn sync_data() {
         } else {
             sleep(Duration::from_secs(5)).await;
         }
+    }
+}
+
+
+async fn fix_transfer_key() {
+    let db_client = DB_POOL.get().await.unwrap();
+    let query = "select name_hash from ans3.ans_name where transfer_key is null";
+    let query = db_client.prepare(&query).await.unwrap();
+    let rows = db_client.query(&query, &[]).await.unwrap();
+
+    for row in rows {
+        let name_hash: String = row.get(0);
+        let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
+        info!("fix_transfer_key: {} {}", name_hash, transfer_key);
+        db_client.execute("update ans3.ans_name set transfer_key=$1 where name_hash=$2",
+                          &[&transfer_key, &name_hash]).await.unwrap();
     }
 }
 
