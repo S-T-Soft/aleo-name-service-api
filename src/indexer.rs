@@ -131,6 +131,8 @@ pub async fn sync_data() {
     //     _ => {}
     // }
 
+    fix_transfer_key().await;
+
     loop {
         let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
             eprintln!("Error fetching next block number: {}", e);
@@ -158,6 +160,101 @@ pub async fn sync_data() {
 }
 
 
+async fn fix_transfer_key() {
+    let db_client = DB_POOL.get().await.unwrap();
+    let query = "select name_hash from ans3.ans_name where transfer_key is null";
+    let query = db_client.prepare(&query).await.unwrap();
+    let rows = db_client.query(&query, &[]).await.unwrap();
+
+    for row in rows {
+        let name_hash: String = row.get(0);
+        let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
+        info!("fix_transfer_key: {} {}", name_hash, transfer_key);
+        db_client.execute("update ans3.ans_name set transfer_key=$1 where name_hash=$2",
+                          &[&transfer_key, &name_hash]).await.unwrap();
+    }
+}
+
+
+async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
+    let block_number = match get_next_block_number(init_latest_height).await {
+        Ok(number) => number,
+        Err(e) => {
+            return Err(Box::new(IndexError(e)));
+        }
+    };
+
+    // get latest height from CDN
+    let latest_cdn_height = match client::get_cdn_last_height().await {
+        Ok(height) => height,
+        Err(err) => {
+            error!("get_latest_height error: {}", err);
+            init_latest_height
+        }
+    };
+
+    // local block height
+    let start = block_number as u32;
+    let end = std::cmp::min(latest_cdn_height, init_latest_height);
+    let total_blocks = end.saturating_sub(start);
+
+    info!("Sync {total_blocks} blocks from CDN (0% complete)...");
+
+    let mut current_start = start;
+    let batch_size = 1000u32;
+
+    while current_start < end {
+        let current_end = std::cmp::min(current_start + batch_size, end);
+
+        let cdn_request_start = current_start.saturating_sub(current_start % MAX_BLOCK_RANGE);
+        let cdn_request_end = current_end.saturating_sub(current_end % MAX_BLOCK_RANGE);
+        if cdn_request_end == cdn_request_start {
+            break;
+        }
+
+        let blocks_to_process = Arc::new(Mutex::new(Vec::new()));
+        let blocks_to_process_clone = blocks_to_process.clone();
+
+        info!("Sync blocks [{cdn_request_start} to {cdn_request_end}] from CDN");
+
+        // Scan the blocks via the CDN.
+        let _ = snarkos_node_cdn::load_blocks(
+            &CDN_ENDPOINT,
+            cdn_request_start,
+            Some(cdn_request_end),
+            move |block| {
+                let mut blocks = blocks_to_process_clone.lock().unwrap();
+                blocks.push(block);
+                Ok(())
+            },
+        ).await;
+
+        let blocks = blocks_to_process.lock().unwrap().clone();
+        let expected_block_count = if cdn_request_end - cdn_request_start < batch_size {
+            cdn_request_end - cdn_request_start
+        } else {
+            batch_size
+        } as usize;
+
+        if blocks.len() == expected_block_count {
+            let mut block_stream = stream::iter(blocks);
+            while let Some(block) = block_stream.next().await {
+                if block.height() >= start && block.height() <= end {
+                    index_data(&block).await;
+                }
+            }
+            let percentage_complete =
+                cdn_request_end.saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
+            info!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
+            current_start = cdn_request_end;
+        } else {
+            warn!("Incomplete batch detected, expected {} blocks, got {}. Retrying...", expected_block_count, blocks.len());
+            // Do not update current_start to retry the same batch
+        }
+    }
+
+    Ok(())
+}
 // async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
 //     let block_number = match get_next_block_number(init_latest_height).await {
 //         Ok(number) => number,
@@ -659,7 +756,7 @@ async fn transfer_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
         let transfer_key_arg = args.get(args.len()  - 2).unwrap();
         let amount_arg = args.get(args.len() - 1).unwrap();
 
-        let transfer_key: String = parse_address(transfer_key_arg).unwrap();
+        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
         let amount: u64 = parse_u64(amount_arg).unwrap();
 
         db_trans.execute("INSERT INTO ans3.domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
@@ -681,7 +778,7 @@ async fn claim_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block
         let transfer_key_arg = args.get(args.len()  - 2).unwrap();
         let amount_arg = args.get(args.len() - 1).unwrap();
 
-        let transfer_key: String = parse_address(transfer_key_arg).unwrap();
+        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
         let amount: u64 = parse_u64(amount_arg).unwrap();
 
         db_trans.execute("UPDATE ans3.domain_credits SET amount = ans3.domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
