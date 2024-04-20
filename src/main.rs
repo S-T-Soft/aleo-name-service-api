@@ -310,8 +310,6 @@ async fn statistic(db_pool: web::Data<deadpool_postgres::Pool>) -> impl Responde
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
     let _guards = init_tracing();
-    info!("xxx");
-
     // db config
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
     let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
