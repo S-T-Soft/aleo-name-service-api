@@ -145,6 +145,7 @@ pub async fn sync_data() {
 
             match reqwest::get(&url).await {
                 Ok(response) => {
+                    info!("req block_number {}", block_number);
                     if let Ok(data) = response.json::<Block<N>>().await {
                         index_data(&data).await;
                     }
