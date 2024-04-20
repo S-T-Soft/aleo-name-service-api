@@ -226,19 +226,19 @@ pub(crate) async fn get_statistic_data(pool: &Pool) -> Result<AnsStatistic, Erro
 pub(crate) async fn is_n_query_from_api(pool: &Pool) -> bool {
     let indexer_height = query_last_block_height(pool).await;
 
-    let last_height: u32 = match get_kv_value(pool, "api_height").await {
+    let last_height: i64 = match get_kv_value(pool, "api_height").await {
         Ok(v) => v.parse().unwrap(),
-        Err(_) => 0u32
+        Err(_) => 0i64
     };
 
     info!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
     return last_height - indexer_height > 16;
 }
 
-async fn query_last_block_height(pool: &Pool) -> u32 {
+async fn query_last_block_height(pool: &Pool) -> i64 {
     let client = pool.get().await.unwrap();
 
-    let mut indexer_height = 0u32;
+    let mut indexer_height = 0i64;
     let query = "select height from ans3.block order by height desc limit 1";
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[]).await;
