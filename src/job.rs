@@ -47,7 +47,7 @@ async fn job_get_indexer_height(redis_pool: &RedisPool, db_pool: &deadpool_postg
     let client = db_pool.get().await.unwrap();
     let mut conn = redis_pool.get().await.unwrap();
 
-    let query = "select height from ans3.block order by height desc limit 1";
+    let query = "select height from ansb.block order by height desc limit 1";
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[]).await;
     match row {

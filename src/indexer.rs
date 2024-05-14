@@ -163,7 +163,7 @@ pub async fn sync_data() {
 
 async fn fix_transfer_key() {
     let db_client = DB_POOL.get().await.unwrap();
-    let query = "select name_hash from ans3.ans_name where transfer_key is null";
+    let query = "select name_hash from ansb.ans_name where transfer_key is null";
     let query = db_client.prepare(&query).await.unwrap();
     let rows = db_client.query(&query, &[]).await.unwrap();
 
@@ -171,7 +171,7 @@ async fn fix_transfer_key() {
         let name_hash: String = row.get(0);
         let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
         info!("fix_transfer_key: {} {}", name_hash, transfer_key);
-        db_client.execute("update ans3.ans_name set transfer_key=$1 where name_hash=$2",
+        db_client.execute("update ansb.ans_name set transfer_key=$1 where name_hash=$2",
                           &[&transfer_key, &name_hash]).await.unwrap();
     }
 }
@@ -273,7 +273,7 @@ async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn E
     let mut local_latest_height = ANS_BLOCK_HEIGHT_START;
     let db_client = DB_POOL.get().await?;
 
-    let query = "select height from ans3.block order by height desc limit 1";
+    let query = "select height from ansb.block order by height desc limit 1";
     let query = db_client.prepare(&query).await.unwrap();
     let rows = db_client.query(&query, &[]).await?;
     if !rows.is_empty() {
@@ -300,7 +300,7 @@ async fn index_data(block: &Block<N>) {
     let mut db_client = DB_POOL.get().await.unwrap();
     let db_trans = db_client.transaction().await.unwrap();
 
-    db_trans.execute("INSERT INTO ans3.block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
+    db_trans.execute("INSERT INTO ansb.block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
                      &[&(block.height() as i64), &block.hash().to_string(), &block.previous_hash().to_string(), &block.timestamp()]).await.unwrap();
 
     for transaction in block.transactions().clone().into_iter() {
@@ -362,7 +362,7 @@ async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, 
         let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
         let mut full_name = name.clone();
 
-        let query = "SELECT full_name FROM ans3.ans_name WHERE name_hash=$1 limit 1";
+        let query = "SELECT full_name FROM ansb.ans_name WHERE name_hash=$1 limit 1";
         let query = db_trans.prepare(&query).await.unwrap();
         let rows = db_trans.query(&query, &[&parent]).await.unwrap();
         if !rows.is_empty() {
@@ -370,7 +370,7 @@ async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, 
             full_name = name.clone() + &".".to_string() + parent_full_name;
         }
 
-        db_trans.execute("INSERT INTO ans3.ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+        db_trans.execute("INSERT INTO ansb.ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5, $6, $7, $8, $9) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &transfer_key, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
@@ -397,11 +397,11 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
         let name = parse_str_4u128(name_arg).unwrap();
         let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
 
-        db_trans.execute("INSERT INTO ans3.ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+        db_trans.execute("INSERT INTO ansb.ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5, $6, $7, $8, $9) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &transfer_key, &name, &"0field".to_string(), &"".to_string(), &name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
-        db_trans.execute("INSERT INTO ans3.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
+        db_trans.execute("INSERT INTO ansb.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &registrar, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
@@ -424,7 +424,7 @@ async fn convert_private_to_public(db_trans: &tokio_postgres::Transaction<'_>, b
         let owner: String = parse_address(owner_arg).unwrap();
         let name_hash: String = parse_field(name_hash_arg).unwrap();
 
-        db_trans.execute("INSERT INTO ans3.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
+        db_trans.execute("INSERT INTO ansb.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
@@ -446,14 +446,14 @@ async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, b
         let owner: String = parse_address(owner_arg).unwrap();
         let name_hash: String = parse_field(name_hash_arg).unwrap();
 
-        db_trans.execute("DELETE from ans3.ans_nft_owner WHERE name_hash=$1", &[&name_hash]).await.unwrap();
+        db_trans.execute("DELETE from ansb.ans_nft_owner WHERE name_hash=$1", &[&name_hash]).await.unwrap();
 
         let version = 2;
-        db_trans.execute("INSERT INTO ans3.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans3.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+        db_trans.execute("INSERT INTO ansb.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ansb.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
-        db_trans.execute("DELETE from ans3.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+        db_trans.execute("DELETE from ansb.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
 
         info!("convert_public_to_private {} {}", name_hash, owner)
     } else {
@@ -474,24 +474,24 @@ async fn transfer_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Blo
         let name_hash: String = parse_field(name_hash_arg).unwrap();
         let caller: String = parse_address(caller_arg).unwrap();
 
-        let query = "SELECT address FROM ans3.ans_nft_owner WHERE name_hash=$1 limit 1";
+        let query = "SELECT address FROM ansb.ans_nft_owner WHERE name_hash=$1 limit 1";
         let query = db_trans.prepare(&query).await.unwrap();
         let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
 
         let owner:String = rows.get(0).unwrap().get(0);
 
 
-        db_trans.execute("INSERT INTO ans3.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
+        db_trans.execute("INSERT INTO ansb.ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &receiver, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         let version = 2;
-        db_trans.execute("INSERT INTO ans3.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans3.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+        db_trans.execute("INSERT INTO ansb.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ansb.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
-        db_trans.execute("DELETE from ans3.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+        db_trans.execute("DELETE from ansb.ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
 
         info!(">> transfer_public {} {} caller {}", name_hash, owner, caller)
     } else {
@@ -511,7 +511,7 @@ async fn set_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
         let name_hash: String = parse_field(name_hash_arg).unwrap();
         let owner: String = parse_address(owner_arg).unwrap();
 
-        db_trans.execute("INSERT INTO ans3.ans_primary_name (name_hash, address, block_height, transaction_id, transition_id) \
+        db_trans.execute("INSERT INTO ansb.ans_primary_name (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (address) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
@@ -531,7 +531,7 @@ async fn unset_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &
 
         let owner: String = parse_address(owner_arg).unwrap();
 
-        db_trans.execute("DELETE from ans3.ans_primary_name WHERE address=$1", &[&owner]).await.unwrap();
+        db_trans.execute("DELETE from ansb.ans_primary_name WHERE address=$1", &[&owner]).await.unwrap();
 
         info!("unset_primary_name {}", owner)
     } else {
@@ -553,7 +553,7 @@ async fn set_resolver(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
         let owner: String = parse_address(owner_arg).unwrap();
         let resolver = parse_str_u128(resolver_arg).unwrap();
 
-        db_trans.execute("UPDATE ans3.ans_name set resolver=$1  WHERE name_hash=$2 ",
+        db_trans.execute("UPDATE ansb.ans_name set resolver=$1  WHERE name_hash=$2 ",
                          &[&resolver, &name_hash]
         ).await.unwrap();
 
@@ -579,14 +579,14 @@ async fn set_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: 
         let content = parse_str_8u128(content_arg).unwrap();
 
         let mut version = 1;
-        let query = "SELECT version FROM ans3.ans_name_version WHERE name_hash=$1 limit 1";
+        let query = "SELECT version FROM ansb.ans_name_version WHERE name_hash=$1 limit 1";
         let query = db_trans.prepare(&query).await.unwrap();
         let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
         if !rows.is_empty() {
             version = rows.get(0).unwrap().get(0);
         }
 
-        db_trans.execute("INSERT INTO ans3.ans_resolver (name_hash, category, version, name, block_height, transaction_id, transition_id) \
+        db_trans.execute("INSERT INTO ansb.ans_resolver (name_hash, category, version, name, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5, $6, $7) ON CONFLICT (name_hash, category, version) DO UPDATE SET name=$4, block_height=$5, transaction_id=$6, transition_id=$7",
                          &[&name_hash, &category, &version, &content, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
@@ -612,14 +612,14 @@ async fn unset_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
         let category: String = parse_str_u128(category_arg).unwrap();
 
         let mut version = 1;
-        let query = "SELECT version FROM ans3.ans_name_version WHERE name_hash=$1 limit 1";
+        let query = "SELECT version FROM ansb.ans_name_version WHERE name_hash=$1 limit 1";
         let query = db_trans.prepare(&query).await.unwrap();
         let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
         if !rows.is_empty() {
             version = rows.get(0).unwrap().get(0);
         }
 
-        db_trans.execute("DELETE from ans3.ans_resolver where name_hash=$1 and category=$2 and version=$3 ",
+        db_trans.execute("DELETE from ansb.ans_resolver where name_hash=$1 and category=$2 and version=$3 ",
                          &[&name_hash, &category, &version]
         ).await.unwrap();
 
@@ -641,8 +641,8 @@ async fn clear_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
         let owner = parse_address(owner_arg).unwrap();
 
         let version = 1;
-        db_trans.execute("INSERT INTO ans3.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans3.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+        db_trans.execute("INSERT INTO ansb.ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ansb.ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
@@ -661,7 +661,7 @@ async fn burn(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, tran
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
 
-        db_trans.execute("DELETE from ans3.ans_name WHERE name_hash=$1", &[&name_hash]).await.unwrap();
+        db_trans.execute("DELETE from ansb.ans_name WHERE name_hash=$1", &[&name_hash]).await.unwrap();
 
         info!("burn: {} in {}|{}", name_hash, block.height(), transaction.id())
     } else {
@@ -680,8 +680,8 @@ async fn transfer_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
         let transfer_key: String = parse_field(transfer_key_arg).unwrap();
         let amount: u64 = parse_u64(amount_arg).unwrap();
 
-        db_trans.execute("INSERT INTO ans3.domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = ans3.domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
+        db_trans.execute("INSERT INTO ansb.domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = ansb.domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&transfer_key, &(amount as i64), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
@@ -702,7 +702,7 @@ async fn claim_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block
         let transfer_key: String = parse_field(transfer_key_arg).unwrap();
         let amount: u64 = parse_u64(amount_arg).unwrap();
 
-        db_trans.execute("UPDATE ans3.domain_credits SET amount = ans3.domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
+        db_trans.execute("UPDATE ansb.domain_credits SET amount = ansb.domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
                          &[&transfer_key, &(amount as i64), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
