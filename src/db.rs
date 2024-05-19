@@ -1,7 +1,8 @@
+use std::time::{SystemTime, UNIX_EPOCH};
 use actix_web::web::Data;
 use deadpool_postgres::Pool;
 use tokio_postgres::Error;
-use tracing::debug;
+use tracing::{debug, info};
 use crate::models::*;
 use crate::utils;
 
@@ -220,4 +221,57 @@ pub(crate) async fn get_statistic_data(pool: &Pool) -> Result<AnsStatistic, Erro
         total_nft_owners: total_owner
     };
     Ok(st)
+}
+
+pub(crate) async fn is_n_query_from_api(pool: &Pool) -> bool {
+    let indexer_height = query_last_block_height(pool).await;
+
+    let last_height: i64 = match get_kv_value(pool, "api_height").await {
+        Ok(v) => v.parse().unwrap(),
+        Err(_) => 0i64
+    };
+
+    info!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
+    return last_height - indexer_height > 16;
+}
+
+async fn query_last_block_height(pool: &Pool) -> i64 {
+    let client = pool.get().await.unwrap();
+
+    let mut indexer_height = 0i64;
+    let query = "select height from ans3.block order by height desc limit 1";
+    let query = client.prepare(&query).await.unwrap();
+    let row = client.query_one(&query, &[]).await;
+    match row {
+        Ok(row) => {
+            if !row.is_empty() {
+                indexer_height = row.get(0);
+                info!("set indexer:api_height: {}", indexer_height);
+            }
+        }
+        Err(_) => {}
+    }
+    indexer_height
+}
+
+pub(crate) async fn get_kv_value(pool: &Pool, key: &str) -> Result<String, Error> {
+    let client = pool.get().await.unwrap();
+
+    let query = "select value from ans3.kv where key=$1 limit 1";
+    let query = client.prepare(&query).await.unwrap();
+    let row = client.query_one(&query, &[&key]).await?;
+    Ok(row.get(0))
+}
+
+pub(crate) async fn set_kv_value(pool: &Pool, key: &str, value: &str) {
+    let client = pool.get().await.unwrap();
+
+    let current_time = SystemTime::now();
+    let timestamp = current_time.duration_since(UNIX_EPOCH).expect("Failed to get timestamp");
+    let current_ts = timestamp.as_secs() as i64;
+
+    client.execute("INSERT INTO ans3.kv (key, value) \
+                             VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated = $3",
+                     &[&key, &value, &current_ts]
+    ).await.unwrap();
 }

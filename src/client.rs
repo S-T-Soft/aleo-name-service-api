@@ -5,10 +5,10 @@ use regex::Regex;
 use serde::Deserialize;
 // use urlencoding;
 use crate::utils;
-use deadpool_redis::{Pool, redis::{cmd}};
+
 use reqwest::Client;
 // use actix_web::web::Data;
-use tracing::{info, instrument, warn};
+use tracing::{instrument, warn};
 
 #[derive(Deserialize, Debug)]
 pub struct NameStruct {
@@ -230,10 +230,10 @@ pub async fn get_cdn_last_height() -> Result<u32, String> {
 }
 
 
-pub(crate) async fn is_n_query_from_api(redis_pool: &Pool) -> bool {
-    let mut conn = redis_pool.get().await.unwrap();
-    let indexer_height: u32 = cmd("GET").arg(&["indexer:height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
-    let last_height: u32 = cmd("GET").arg(&["cache:api_height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
-    info!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
-    return last_height - indexer_height > 16;
-}
+// pub(crate) async fn is_n_query_from_api(redis_pool: &Pool) -> bool {
+//     let mut conn = redis_pool.get().await.unwrap();
+//     let indexer_height: u32 = cmd("GET").arg(&["indexer:height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
+//     let last_height: u32 = cmd("GET").arg(&["cache:api_height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
+//     info!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
+//     return last_height - indexer_height > 16;
+// }

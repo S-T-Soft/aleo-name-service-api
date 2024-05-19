@@ -126,10 +126,10 @@ impl Error for IndexError {}
 
 pub async fn sync_data() {
     let latest_height = get_latest_height().await;
-    match sync_from_cdn(latest_height).await {
-        Ok(_) => info!("sync from cdn finished!"),
-        _ => {}
-    }
+    // match sync_from_cdn(latest_height).await {
+    //     Ok(_) => info!("sync from cdn finished!"),
+    //     _ => {}
+    // }
 
     fix_transfer_key().await;
 
@@ -146,7 +146,6 @@ pub async fn sync_data() {
             match reqwest::get(&url).await {
                 Ok(response) => {
                     if let Ok(data) = response.json::<Block<N>>().await {
-                        info!("req block_number {}", block_number);
                         index_data(&data).await;
                     }
                 },
@@ -176,86 +175,86 @@ async fn fix_transfer_key() {
     }
 }
 
-
-async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
-    let block_number = match get_next_block_number(init_latest_height).await {
-        Ok(number) => number,
-        Err(e) => {
-            return Err(Box::new(IndexError(e)));
-        }
-    };
-
-    // get latest height from CDN
-    let latest_cdn_height = match client::get_cdn_last_height().await {
-        Ok(height) => height,
-        Err(err) => {
-            error!("get_latest_height error: {}", err);
-            init_latest_height
-        }
-    };
-
-    // local block height
-    let start = block_number as u32;
-    let end = std::cmp::min(latest_cdn_height, init_latest_height);
-    let total_blocks = end.saturating_sub(start);
-
-    info!("Sync {total_blocks} blocks from CDN (0% complete)...");
-
-    let mut current_start = start;
-    let batch_size = 1000u32;
-
-    while current_start < end {
-        let current_end = std::cmp::min(current_start + batch_size, end);
-
-        let cdn_request_start = current_start.saturating_sub(current_start % MAX_BLOCK_RANGE);
-        let cdn_request_end = current_end.saturating_sub(current_end % MAX_BLOCK_RANGE);
-        if cdn_request_end == cdn_request_start {
-            break;
-        }
-
-        let blocks_to_process = Arc::new(Mutex::new(Vec::new()));
-        let blocks_to_process_clone = blocks_to_process.clone();
-
-        info!("Sync blocks [{cdn_request_start} to {cdn_request_end}] from CDN");
-
-        // Scan the blocks via the CDN.
-        let _ = snarkos_node_cdn::load_blocks(
-            &CDN_ENDPOINT,
-            cdn_request_start,
-            Some(cdn_request_end),
-            move |block| {
-                let mut blocks = blocks_to_process_clone.lock().unwrap();
-                blocks.push(block);
-                Ok(())
-            },
-        ).await;
-
-        let blocks = blocks_to_process.lock().unwrap().clone();
-        let expected_block_count = if cdn_request_end - cdn_request_start < batch_size {
-            cdn_request_end - cdn_request_start
-        } else {
-            batch_size
-        } as usize;
-
-        if blocks.len() == expected_block_count {
-            let mut block_stream = stream::iter(blocks);
-            while let Some(block) = block_stream.next().await {
-                if block.height() >= start && block.height() <= end {
-                    index_data(&block).await;
-                }
-            }
-            let percentage_complete =
-                cdn_request_end.saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
-            info!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
-            current_start = cdn_request_end;
-        } else {
-            warn!("Incomplete batch detected, expected {} blocks, got {}. Retrying...", expected_block_count, blocks.len());
-            // Do not update current_start to retry the same batch
-        }
-    }
-
-    Ok(())
-}
+// async fn sync_from_cdn(init_latest_height: u32) -> Result<(), Box<dyn Error>> {
+//     let block_number = match get_next_block_number(init_latest_height).await {
+//         Ok(number) => number,
+//         Err(e) => {
+//             return Err(Box::new(IndexError(e)));
+//         }
+//     };
+//
+//     // get latest height from CDN
+//     let latest_cdn_height = match client::get_cdn_last_height().await {
+//         Ok(height) => height,
+//         Err(err) => {
+//             error!("get_latest_height error: {}", err);
+//             init_latest_height
+//         }
+//     };
+//
+//     // local block height
+//     let start = block_number as u32;
+//     let end = std::cmp::min(latest_cdn_height, init_latest_height);
+//     let total_blocks = end.saturating_sub(start);
+//
+//     info!("Sync {total_blocks} blocks from CDN (0% complete)...");
+//
+//     let mut current_start = start;
+//     let batch_size = 1000u32;
+//
+//     while current_start < end {
+//         let current_end = std::cmp::min(current_start + batch_size, end);
+//
+//         let cdn_request_start = current_start.saturating_sub(current_start % MAX_BLOCK_RANGE);
+//         let cdn_request_end = current_end.saturating_sub(current_end % MAX_BLOCK_RANGE);
+//         if cdn_request_end == cdn_request_start {
+//             break;
+//         }
+//
+//         let blocks_to_process = Arc::new(Mutex::new(Vec::new()));
+//         let blocks_to_process_clone = blocks_to_process.clone();
+//
+//         info!("Sync blocks [{cdn_request_start} to {cdn_request_end}] from CDN");
+//         let _shutdown = Default::default();
+//         // Scan the blocks via the CDN.
+//         let _ = snarkos_node_cdn::load_blocks(
+//             &CDN_ENDPOINT,
+//             cdn_request_start,
+//             Some(cdn_request_end),
+//             _shutdown,
+//             move |block| {
+//                 let mut blocks = blocks_to_process_clone.lock().unwrap();
+//                 blocks.push(block);
+//                 Ok(())
+//             },
+//         ).await;
+//
+//         let blocks = blocks_to_process.lock().unwrap().clone();
+//         let expected_block_count = if cdn_request_end - cdn_request_start < batch_size {
+//             cdn_request_end - cdn_request_start
+//         } else {
+//             batch_size
+//         } as usize;
+//
+//         if blocks.len() == expected_block_count {
+//             let mut block_stream = stream::iter(blocks);
+//             while let Some(block) = block_stream.next().await {
+//                 if block.height() >= start && block.height() <= end {
+//                     index_data(&block).await;
+//                 }
+//             }
+//             let percentage_complete =
+//                 cdn_request_end.saturating_sub(start) as f64 * 100.0 / total_blocks as f64;
+//             info!("Sync {total_blocks} blocks from CDN ({percentage_complete:.2}% complete)...");
+//             current_start = cdn_request_end;
+//         } else {
+//             warn!("Incomplete batch detected, expected {} blocks, got {}. Retrying...", expected_block_count, blocks.len());
+//             // Do not update current_start to retry the same batch
+//         }
+//     }
+//
+//     Ok(())
+// }
 
 async fn get_latest_height() -> u32 {
     loop {
