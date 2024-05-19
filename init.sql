@@ -95,7 +95,7 @@ create table ansb.domain_credits
         unique (transfer_key)
 );
 
-create table ans3.kv
+create table ansb.kv
 (
     key    text,
     value  text,
