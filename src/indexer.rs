@@ -18,9 +18,9 @@ use crate::{client, utils};
 
 type N = Testnet3;
 static MAX_BLOCK_RANGE: u32 = 50;
-const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet3.blocks/phase3";
+const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
 const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org/v1";
-const ANS_BLOCK_HEIGHT_START: i64 = 649183;
+const ANS_BLOCK_HEIGHT_START: i64 = 1;
 
 lazy_static! {
     static ref PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"aleo_name_service_registry_v3".as_bytes().to_bits_le())
@@ -101,8 +101,6 @@ lazy_static! {
     static ref CLAIM_CREDITS_PRIVATE: Identifier<N> = Identifier::<N>::from_field(&*CLAIM_CREDITS_PRIVATE_FIELD)
         .expect("Failed to create Identifier from Field");
 
-    // db config
-    static ref DB_SCHEMA: String = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
     static ref DB_POOL: deadpool_postgres::Pool = {
         let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
         let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
@@ -142,7 +140,7 @@ pub async fn sync_data() {
 
         if block_number > -1 {
             let url_pre = env::var("URL_HOST").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
-            let url = format!("{}/testnet3/block/{}", url_pre, block_number);
+            let url = format!("{}/testnet/block/{}", url_pre, block_number);
 
             match reqwest::get(&url).await {
                 Ok(response) => {
@@ -163,7 +161,7 @@ pub async fn sync_data() {
 
 async fn fix_transfer_key() {
     let db_client = DB_POOL.get().await.unwrap();
-    db_client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await.unwrap();
+    db_client.execute("SET search_path TO ansb", &[]).await.unwrap();
 
     let query = "select name_hash from ans_name where transfer_key is null";
     let query = db_client.prepare(&query).await.unwrap();
@@ -274,7 +272,8 @@ async fn get_latest_height() -> u32 {
 async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn Error>> {
     let mut local_latest_height = ANS_BLOCK_HEIGHT_START;
     let db_client = DB_POOL.get().await?;
-    db_client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
+    db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await.unwrap();
 
     let query = "select height from block order by height desc limit 1";
     let query = db_client.prepare(&query).await.unwrap();
@@ -301,7 +300,8 @@ async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn E
 async fn index_data(block: &Block<N>) {
     info!("Process block {} on {}", block.height(), block.timestamp());
     let mut db_client = DB_POOL.get().await.unwrap();
-    db_client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await.unwrap();
+    let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
+    db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await.unwrap();
     let db_trans = db_client.transaction().await.unwrap();
 
     db_trans.execute("INSERT INTO block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",

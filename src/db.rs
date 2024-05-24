@@ -1,20 +1,15 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::env;
 use actix_web::web::Data;
-use deadpool_postgres::Pool;
+use deadpool_postgres::{Manager, Object, Pool};
 use lazy_static::lazy_static;
 use tokio_postgres::Error;
 use tracing::{debug, info};
 use crate::models::*;
 use crate::utils;
 
-lazy_static! {
-    static ref DB_SCHEMA: String = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
-}
-
 pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWithPrimary, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select an.id, an.name_hash, an.full_name, an.resolver, ap.id, dc.amount
             FROM ans_name AS an
@@ -51,8 +46,7 @@ pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWit
 }
 
 pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWithPrimary>, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select ao.id, ao.name_hash, ao.address, an.full_name, ap.id, an.resolver, dc.amount
             FROM ans_nft_owner as ao
@@ -95,8 +89,7 @@ pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWith
 }
 
 pub async fn get_resolvers_by_namehash(pool: &Pool, name_hash: &str) -> Result<Vec<Resolver>, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select ar.id, ar.category, ar.version, ar.name from ans_resolver As ar
         LEFT JOIN ans_name_version as av ON ar.name_hash = av.name_hash
@@ -121,8 +114,7 @@ pub async fn get_resolvers_by_namehash(pool: &Pool, name_hash: &str) -> Result<V
 }
 
 pub async fn get_resolver(pool: &Pool, name_hash: &str, category: &str) -> Result<Resolver, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select ar.id, ar.category, ar.version, ar.name from ans_resolver As ar
         LEFT JOIN ans_name_version as av ON ar.name_hash = av.name_hash
@@ -142,8 +134,7 @@ pub async fn get_resolver(pool: &Pool, name_hash: &str, category: &str) -> Resul
 }
 
 pub async fn get_subdomains_by_namehash(pool: &Pool, name_hash: &str) -> Result<Vec<NFT>, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select an.id, an.name_hash, an.name, ao.address from ans_name as an
             LEFT JOIN ans_nft_owner as ao ON an.name_hash = ao.name_hash
@@ -170,8 +161,7 @@ pub async fn get_subdomains_by_namehash(pool: &Pool, name_hash: &str) -> Result<
 }
 
 pub async fn get_primary_name_by_address(pool: &Data<Pool>, address: &String) -> Result<String, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select ap.id, an.full_name from ans_primary_name As ap
         LEFT JOIN ans_name as an ON ap.name_hash = an.name_hash
@@ -184,8 +174,7 @@ pub async fn get_primary_name_by_address(pool: &Data<Pool>, address: &String) ->
 }
 
 pub async fn get_hash_by_name(pool: &Data<Pool>, name: &String) -> Result<String, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select id, name_hash from ans_name WHERE full_name = $1 limit 1";
     let query = client.prepare(&query).await.unwrap();
@@ -194,8 +183,7 @@ pub async fn get_hash_by_name(pool: &Data<Pool>, name: &String) -> Result<String
 }
 
 pub async fn get_address_by_hash(pool: &Data<Pool>, name_hash: &String) -> Result<String, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let query = "select id, address from ans_nft_owner WHERE name_hash = $1 limit 1";
     let query = client.prepare(&query).await.unwrap();
@@ -204,8 +192,7 @@ pub async fn get_address_by_hash(pool: &Data<Pool>, name_hash: &String) -> Resul
 }
 
 pub(crate) async fn get_statistic_data(pool: &Pool) -> Result<AnsStatistic, Error>{
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
     let cur_time = utils::get_current_timestamp();
     let time_24_before:i64 = (cur_time - 24 * 3600) as i64;
@@ -255,11 +242,10 @@ pub(crate) async fn is_n_query_from_api(pool: &Pool) -> bool {
 }
 
 async fn query_last_block_height(pool: &Pool) -> i64 {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await.unwrap();
+    let client = get_db_client(pool).await;
 
     let mut indexer_height = 0i64;
-    let query = "select height from ans3.block order by height desc limit 1";
+    let query = "select height from block order by height desc limit 1";
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[]).await;
     match row {
@@ -275,25 +261,30 @@ async fn query_last_block_height(pool: &Pool) -> i64 {
 }
 
 pub(crate) async fn get_kv_value(pool: &Pool, key: &str) -> Result<String, Error> {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await?;
+    let client = get_db_client(pool).await;
 
-    let query = "select value from ans3.kv where key=$1 limit 1";
+    let query = "select value from kv where key=$1 limit 1";
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[&key]).await?;
     Ok(row.get(0))
 }
 
 pub(crate) async fn set_kv_value(pool: &Pool, key: &str, value: &str) {
-    let client = pool.get().await.unwrap();
-    client.execute("SET search_path TO $1", &[&DB_SCHEMA.as_str()]).await.unwrap();
+    let client = get_db_client(pool).await;
 
     let current_time = SystemTime::now();
     let timestamp = current_time.duration_since(UNIX_EPOCH).expect("Failed to get timestamp");
     let current_ts = timestamp.as_secs() as i64;
 
-    client.execute("INSERT INTO ans3.kv (key, value) \
+    client.execute("INSERT INTO kv (key, value) \
                              VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated = $3",
                      &[&key, &value, &current_ts]
     ).await.unwrap();
+}
+
+async fn get_db_client(pool: &Pool) -> Object {
+    let client = pool.get().await.unwrap();
+    let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
+    client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await.unwrap();
+    client
 }

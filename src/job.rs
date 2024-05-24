@@ -92,7 +92,7 @@ async fn job_get_api_host(db_pool: &deadpool_postgres::Pool) {
 
 #[instrument]
 pub async fn get_last_height(api_host: &str) -> Result<u32, String> {
-    let url = format!("{}/testnet3/block/height/latest", api_host);
+    let url = format!("{}/testnet/block/height/latest", api_host);
     let resp = client::call_api(url).await?;
     let height: u32 = resp.parse().unwrap_or_else(|_| 0);
     Ok( height)
