@@ -4,10 +4,10 @@ use std::str::FromStr;
 use lazy_static::lazy_static;
 use snarkvm_console_program::{Field, ToBits, Value};
 use snarkvm_console_network::prelude::Zero;
-use snarkvm_console_network::{Network, Testnet3, ToFields};
+use snarkvm_console_network::{Network, TestnetV0, ToFields};
 use tracing::info;
 
-type N = Testnet3;
+type N = TestnetV0;
 
 lazy_static! {
     static ref EMPTY_U128_ARR: Vec<Field<N>> = Value::<N>::try_from("[0u128, 0u128]").unwrap().to_fields().unwrap();

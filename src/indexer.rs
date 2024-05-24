@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use futures::stream::{self, StreamExt};
 use lazy_static::lazy_static;
 use tokio::time::sleep;
-use snarkvm_console_network::{FromBits, Testnet3, ToBits};
+use snarkvm_console_network::{FromBits, TestnetV0, ToBits};
 use snarkvm_ledger_block::{Block, Transaction};
 use reqwest;
 use snarkvm_console_network::prelude::ToBytes;
@@ -16,7 +16,7 @@ use tokio_postgres::NoTls;
 use tracing::{error, info, warn};
 use crate::{client, utils};
 
-type N = Testnet3;
+type N = TestnetV0;
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
 const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org/v1";
@@ -161,7 +161,8 @@ pub async fn sync_data() {
 
 async fn fix_transfer_key() {
     let db_client = DB_POOL.get().await.unwrap();
-    db_client.execute("SET search_path TO ansb", &[]).await.unwrap();
+    let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
+    db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await.unwrap();
 
     let query = "select name_hash from ans_name where transfer_key is null";
     let query = db_client.prepare(&query).await.unwrap();
