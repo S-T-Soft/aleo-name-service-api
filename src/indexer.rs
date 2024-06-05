@@ -20,10 +20,10 @@ type N = TestnetV0;
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
 const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org/v1";
-const ANS_BLOCK_HEIGHT_START: i64 = 1;
+const ANS_BLOCK_HEIGHT_START: i64 = 182000;
 
 lazy_static! {
-    static ref PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"aleo_name_service_registry_v3".as_bytes().to_bits_le())
+    static ref PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"aleo_name_service_registry_v1".as_bytes().to_bits_le())
         .expect("Failed to create Field from bits");
     static ref PROGRAM_ID: Identifier<N> = Identifier::<N>::from_field(&*PROGRAM_ID_FIELD)
         .expect("Failed to create Identifier from Field");
@@ -47,11 +47,11 @@ lazy_static! {
         .expect("Failed to create Field from bits");
     static ref TRANSFER_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_PUBLIC_FIELD)
         .expect("Failed to create Identifier from Field");
-    static ref CONVERT_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"convert_private_to_public".as_bytes().to_bits_le())
+    static ref CONVERT_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_private_to_public".as_bytes().to_bits_le())
         .expect("Failed to create Field from bits");
     static ref CONVERT_PRIVATE_TO_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*CONVERT_PUBLIC_FIELD)
         .expect("Failed to create Identifier from Field");
-    static ref CONVERT_PRIVATE_FIELD: Field<N> = Field::<N>::from_bits_le(&"convert_public_to_private".as_bytes().to_bits_le())
+    static ref CONVERT_PRIVATE_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_public_to_private".as_bytes().to_bits_le())
         .expect("Failed to create Field from bits");
     static ref CONVERT_PUBLIC_TO_PRIVATE: Identifier<N> = Identifier::<N>::from_field(&*CONVERT_PRIVATE_FIELD)
         .expect("Failed to create Identifier from Field");
@@ -67,6 +67,15 @@ lazy_static! {
         .expect("Failed to create Field from bits");
     static ref SET_RESOLVER: Identifier<N> = Identifier::<N>::from_field(&*SET_RESOLVER_FIELD)
         .expect("Failed to create Identifier from Field");
+    static ref BURN_FIELD: Field<N> = Field::<N>::from_bits_le(&"burn".as_bytes().to_bits_le())
+        .expect("Failed to create Field from bits");
+    static ref BURN: Identifier<N> = Identifier::<N>::from_field(&*BURN_FIELD)
+        .expect("Failed to create Identifier from Field");
+
+    static ref RECORD_PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"ans_resolver_v1".as_bytes().to_bits_le())
+        .expect("Failed to create Field from bits");
+    static ref RECORD_PROGRAM_ID: Identifier<N> = Identifier::<N>::from_field(&*RECORD_PROGRAM_ID_FIELD)
+        .expect("Failed to create Identifier from Field");
     static ref SET_RESOLVER_RECORD_FIELD: Field<N> = Field::<N>::from_bits_le(&"set_resolver_record".as_bytes().to_bits_le())
         .expect("Failed to create Field from bits");
     static ref SET_RESOLVER_RECORD: Identifier<N> = Identifier::<N>::from_field(&*SET_RESOLVER_RECORD_FIELD)
@@ -75,16 +84,8 @@ lazy_static! {
         .expect("Failed to create Field from bits");
     static ref UNSET_RESOLVER_RECORD: Identifier<N> = Identifier::<N>::from_field(&*UNSET_RESOLVER_RECORD_FIELD)
         .expect("Failed to create Identifier from Field");
-    static ref CLEAR_RESOLVER_RECORD_FIELD: Field<N> = Field::<N>::from_bits_le(&"clear_resolver_record".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref CLEAR_RESOLVER_RECORD: Identifier<N> = Identifier::<N>::from_field(&*CLEAR_RESOLVER_RECORD_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref BURN_FIELD: Field<N> = Field::<N>::from_bits_le(&"burn".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref BURN: Identifier<N> = Identifier::<N>::from_field(&*BURN_FIELD)
-        .expect("Failed to create Identifier from Field");
 
-    static ref TRANSFER_PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"ans_credit_transfer_v5".as_bytes().to_bits_le())
+    static ref TRANSFER_PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"ans_credit_transfer_v1".as_bytes().to_bits_le())
         .expect("Failed to create Field from bits");
     static ref TRANSFER_PROGRAM_ID: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_PROGRAM_ID_FIELD)
         .expect("Failed to create Identifier from Field");
@@ -324,9 +325,6 @@ async fn index_data(block: &Block<N>) {
                         name if name == &*SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await,
                         name if name == &*UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await,
                         name if name == &*SET_RESOLVER => set_resolver(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*CLEAR_RESOLVER_RECORD => clear_resolver_record(&db_trans, &block, &transaction, transition).await,
                         name if name == &*BURN => burn(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
@@ -337,6 +335,14 @@ async fn index_data(block: &Block<N>) {
                         name if name == &*TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == &*CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == &*CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        _ => {}
+                    }
+                }
+                else if transition.program_id().name() == &*RECORD_PROGRAM_ID {
+                    info!("process transition {}, function name: {}", transition.id(), transition.function_name());
+                    match transition.function_name() {
+                        name if name == &*SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
@@ -399,7 +405,7 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
 
         let registrar: String = parse_address(registrar_arg).unwrap();
         let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let name = parse_str_4u128(name_arg).unwrap();
+        let name = parse_str_name_struct(name_arg).unwrap();
         let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
 
         db_trans.execute("INSERT INTO ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
@@ -715,6 +721,18 @@ async fn claim_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block
     } else {
         error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
     };
+}
+
+fn parse_str_name_struct(name_arg: &Argument<N>) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 64] = [0; 64];
+
+    name[0..16].copy_from_slice(&name_bytes[20..36]);
+    name[16..32].copy_from_slice(&name_bytes[41..57]);
+    name[32..48].copy_from_slice(&name_bytes[62..78]);
+    name[48..64].copy_from_slice(&name_bytes[83..99]);
+
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
 }
 
 // parse argument
