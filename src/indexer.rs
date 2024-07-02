@@ -20,7 +20,7 @@ type N = TestnetV0;
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
 const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org/v1";
-const ANS_BLOCK_HEIGHT_START: i64 = 182000;
+const ANS_BLOCK_HEIGHT_START: i64 = 50092;
 
 lazy_static! {
     static ref PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"aleo_name_service_registry_v1".as_bytes().to_bits_le())
@@ -147,6 +147,8 @@ pub async fn sync_data() {
                 Ok(response) => {
                     if let Ok(data) = response.json::<Block<N>>().await {
                         index_data(&data).await;
+                    } else {
+                        warn!("err parse response!");
                     }
                 },
                 Err(e) => eprintln!("Error fetching data: {}", e),
