@@ -13,7 +13,7 @@ serde_json = "1.0.64"
 snarkvm-console-program = { git = "https://github.com/AleoNet/snarkVM", rev = "d170a9f" }
 snarkvm-console-network = { git = "https://github.com/AleoNet/snarkVM", rev = "d170a9f" }
 snarkvm-ledger-block = { git = "https://github.com/AleoNet/snarkVM", rev = "d170a9f" }
-snarkos-node-cdn = { git = "https://github.com/AleoNet/snarkOS", branch = "testnet-beta" }
+snarkos-node-cdn = { git = "https://github.com/AleoNet/snarkOS", tag = "testnet-beta" }
 reqwest = { version = "0.11", features = ["json"] }
 lazy_static = "1.4.0"
 regex = "1.5.4"
