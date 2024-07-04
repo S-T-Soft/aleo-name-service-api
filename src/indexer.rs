@@ -55,6 +55,10 @@ lazy_static! {
         .expect("Failed to create Field from bits");
     static ref CONVERT_PUBLIC_TO_PRIVATE: Identifier<N> = Identifier::<N>::from_field(&*CONVERT_PRIVATE_FIELD)
         .expect("Failed to create Identifier from Field");
+    static ref TRANSFER_FROM_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_from_public".as_bytes().to_bits_le())
+        .expect("Failed to create Field from bits");
+    static ref TRANSFER_FROM_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_FROM_PUBLIC_FIELD)
+        .expect("Failed to create Identifier from Field");
     static ref SET_PRIMARY_NAME_FIELD: Field<N> = Field::<N>::from_bits_le(&"set_primary_name".as_bytes().to_bits_le())
         .expect("Failed to create Field from bits");
     static ref SET_PRIMARY_NAME: Identifier<N> = Identifier::<N>::from_field(&*SET_PRIMARY_NAME_FIELD)
@@ -323,6 +327,7 @@ async fn index_data(block: &Block<N>) {
                         name if name == &*REGISTER_PUBLIC => register(&db_trans, &block, &transaction, transition).await,
                         name if name == &*CONVERT_PRIVATE_TO_PUBLIC => convert_private_to_public(&db_trans, &block, &transaction, transition).await,
                         name if name == &*CONVERT_PUBLIC_TO_PRIVATE => convert_public_to_private(&db_trans, &block, &transaction, transition).await,
+                        name if name == &*TRANSFER_FROM_PUBLIC => transfer_from_public(&db_trans, &block, &transaction, transition).await,
                         name if name == &*TRANSFER_PUBLIC => transfer_public(&db_trans, &block, &transaction, transition).await,
                         name if name == &*SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await,
                         name if name == &*UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await,
@@ -471,6 +476,37 @@ async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, b
         info!("convert_public_to_private {} {}", name_hash, owner)
     } else {
         error!("convert_public_to_private: Error in {} | {}", block.height(), transaction.id())
+    };
+}
+
+async fn transfer_from_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let owner_arg = args.get(1).unwrap();
+        let new_owner_arg = args.get(2).unwrap();
+        let name_hash_arg = args.get(3).unwrap();
+
+        let owner: String = parse_address(owner_arg).unwrap();
+        let new_owner: String = parse_address(new_owner_arg).unwrap();
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+
+        db_trans.execute("INSERT INTO ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
+                         &[&name_hash, &new_owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        let version = 2;
+        db_trans.execute("INSERT INTO ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+        db_trans.execute("DELETE from ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+
+        info!("transfer_from_public {} {} to {}", name_hash, owner, new_owner)
+    } else {
+        error!("transfer_from_public: Error in {} | {}", block.height(), transaction.id())
     };
 }
 

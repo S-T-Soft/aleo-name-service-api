@@ -47,7 +47,8 @@ async fn job_get_api_height(db_pool: &deadpool_postgres::Pool) {
 
 async fn job_get_statistic_data(db_pool: &deadpool_postgres::Pool) {
     match db::get_statistic_data(db_pool).await {
-        Ok(data) => {
+        Ok(mut data) => {
+            data.healthy = !db::is_n_query_from_api(&db_pool).await;
             info!("job_get_statistic_data success!");
             let key = "api_statistic";
             let data_json = serde_json::to_string(&data).expect("Failed get statistic json");

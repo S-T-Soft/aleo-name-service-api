@@ -98,18 +98,19 @@ async fn address_api(db_pool: web::Data<deadpool_postgres::Pool>, name: web::Pat
     if name_hash.is_empty() {
         return HttpResponse::NotFound().finish();
     }
+
+    if db::is_n_query_from_api(&db_pool).await {
+        return match client::get_owner(&name_hash).await {
+            Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
+            Err(_) => HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() })
+        };
+    }
+
     let address = db::get_address_by_hash(&db_pool, &name_hash);
 
     match address.await {
         Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
         Err(_e) => {
-            if db::is_n_query_from_api(&db_pool).await {
-                return match client::get_owner(&name_hash).await {
-                    Ok(address) => HttpResponse::Ok().json(AddressName { address, name: name.clone() }),
-                    Err(_) => HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() })
-                };
-            }
-
             HttpResponse::Ok().json(AddressName { address: "Private Registration".to_string(), name: name.clone() })
         },
     }

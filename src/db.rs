@@ -238,7 +238,8 @@ pub(crate) async fn is_n_query_from_api(pool: &Pool) -> bool {
     };
 
     info!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
-    return last_height - indexer_height > 16;
+    let healthy_behind = env::var("HEALTHY_BEHIND").unwrap_or_else(|_| "10".to_string());
+    return last_height - indexer_height > healthy_behind.parse().unwrap();
 }
 
 async fn query_last_block_height(pool: &Pool) -> i64 {
