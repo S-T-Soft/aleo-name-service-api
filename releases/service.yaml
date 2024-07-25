@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ans-indexer-srv
+  namespace: ans-testnet-beta
+spec:
+  selector:
+    app: ans-indexer
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
