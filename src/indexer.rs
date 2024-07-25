@@ -145,9 +145,9 @@ pub async fn sync_data() {
 
         if block_number > -1 {
             let url_pre = env::var("URL_HOST").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
-            let url = format!("{}/testnet/block/{}", url_pre, block_number);
+            let url = format!("{}/block/{}", url_pre, block_number);
             if (latest_height as i64 - block_number) > 10 {
-                let url_batch = format!("{}/testnet/blocks?start={}&end={}", url_pre, block_number, block_number + 10);
+                let url_batch = format!("{}/blocks?start={}&end={}", url_pre, block_number, block_number + 10);
                 match reqwest::get(&url_batch).await {
                     Ok(response) => {
                         if let Ok(datas) = response.json::<Vec<Block<N>>>().await {
