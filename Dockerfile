@@ -1,5 +1,5 @@
 # stage 1
-FROM rust:1.71 as builder
+FROM rust:1.76 as builder
 
 WORKDIR /usr/src/ans_api
 
