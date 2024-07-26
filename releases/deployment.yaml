@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: ans-indexer-container
-          image: ans-indexer:latest
+          image: ghcr.io/s-t-soft/aleo-name-service-api:latest
           env:
             - name: PROGRAM
               value: "aleo_name_service_registry_v1.aleo"

@@ -5,3 +5,7 @@ resources:
   - releases/deployment.yaml
   - releases/service.yaml
   - releases/ingress.yaml
+
+images:
+  - name: ghcr.io/s-t-soft/aleo-name-service-api
+    newTag: "latest"
