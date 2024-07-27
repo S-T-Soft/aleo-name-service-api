@@ -94,9 +94,18 @@ jobs:
 
       - name: Update Kustomize image tag
         run: |
-          yq -y -i '.images[0].newTag = "${{ needs.build-and-push.outputs.IMAGE_TAG }}"' kustomization.yaml
+          IMAGE_TAG="${{ needs.build-and-push.outputs.IMAGE_TAG }}"
+          CURRENT_TAG=$(yq '.images[0].newTag' kustomization.yaml)
+          if [ "$IMAGE_TAG" = "$CURRENT_TAG" ]; then
+            echo "Image tag is the same as the current tag. Skipping commit."
+            echo "skip_commit=true" >> $GITHUB_ENV
+          else
+            yq -y -i '.images[0].newTag = "${{ needs.build-and-push.outputs.IMAGE_TAG }}"' kustomization.yaml
+            echo "skip_commit=false" >> $GITHUB_ENV
+          fi
 
       - name: Commit changes
+        if: env.skip_commit != 'true'
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'

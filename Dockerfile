@@ -1,5 +1,5 @@
 # stage 1
-FROM rust:1.76 as builder
+FROM rust:1.76.0-bullseye AS builder
 
 WORKDIR /usr/src/ans_api
 
