@@ -7,5 +7,6 @@ resources:
   - releases/ingress.yaml
 
 images:
-  - name: ghcr.io/s-t-soft/aleo-name-service-api
+  - name: indexer-api
+    newName: "ghcr.io/s-t-soft/aleo-name-service-api"
     newTag: "latest"
