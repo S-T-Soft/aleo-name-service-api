@@ -21,7 +21,7 @@ jobs:
       id-token: write
 
     outputs:
-      IMAGE_DIGEST: ${{ steps.build-and-push.outputs.digest }}
+      IMAGE_TAG: ${{ steps.meta.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -49,6 +49,12 @@ jobs:
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=schedule,pattern=nightly,enable=true,priority=1000
+            type=ref,event=branch,enable=true,priority=600
+            type=ref,event=tag,enable=true,priority=600
+            type=ref,event=pr,prefix=pr-,enable=true,priority=600
+            type=sha,format=long,prefix=sha-,enable=true,priority=100
 
       - name: Build and push Docker image
         id: build-and-push
@@ -88,14 +94,14 @@ jobs:
 
       - name: Update Kustomize image tag
         run: |
-          yq -y -i '.images[0].newTag = "${{ needs.build-and-push.outputs.IMAGE_DIGEST }}"' kustomization.yaml
+          yq -y -i '.images[0].newTag = "${{ needs.build-and-push.outputs.IMAGE_TAG }}"' kustomization.yaml
 
       - name: Commit changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add kustomization.yaml
-          git commit -m "Update image tag to ${{ needs.build-and-push.outputs.IMAGE_DIGEST }} [skip ci]"
+          git commit -m "Update image tag to ${{ needs.build-and-push.outputs.IMAGE_TAG }} [skip ci]"
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:${{ github.ref }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

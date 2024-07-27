@@ -5,8 +5,7 @@ resources:
   - releases/deployment.yaml
   - releases/service.yaml
   - releases/ingress.yaml
-
 images:
   - name: indexer-api
-    newName: "ghcr.io/s-t-soft/aleo-name-service-api"
-    newTag: "latest"
+    newName: ghcr.io/s-t-soft/aleo-name-service-api
+    newTag: sha256:9e2e13d0b38562f0fb87c23a3a35e5f1ddcecdf0c84038dee5e50e19d93194ab
