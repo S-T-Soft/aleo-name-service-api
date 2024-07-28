@@ -129,7 +129,7 @@ impl fmt::Display for IndexError {
 impl Error for IndexError {}
 
 pub async fn sync_data() {
-    let latest_height = get_latest_height().await;
+    let mut latest_height = get_latest_height().await as i64;
     // match sync_from_cdn(latest_height).await {
     //     Ok(_) => info!("sync from cdn finished!"),
     //     _ => {}
@@ -140,18 +140,15 @@ pub async fn sync_data() {
     loop {
         let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
             eprintln!("Error fetching next block number: {}", e);
-            -1
+            0
         });
 
-        if block_number > -1 {
-            let url_pre = env::var("URL_HOST").unwrap_or_else(|_| DEFAULT_API_PRE.to_string());
-            let url = format!("{}/block/{}", url_pre, block_number);
-            if (latest_height as i64 - block_number) > 10 {
-                let url_batch = format!("{}/blocks?start={}&end={}", url_pre, block_number, block_number + 10);
-                match reqwest::get(&url_batch).await {
+        if block_number > 0 {
+            if (latest_height - block_number) > 10 {
+                match client::get_blocks(block_number as u32, block_number as u32 + 10).await {
                     Ok(response) => {
-                        if let Ok(datas) = response.json::<Vec<Block<N>>>().await {
-                            for data in datas {
+                        if let Ok(blocks) = serde_json::from_value::<Vec<Block<N>>>(response) {
+                            for data in blocks {
                                 index_data(&data).await;
                             }
                         } else {
@@ -162,9 +159,9 @@ pub async fn sync_data() {
                 }
 
             } else {
-                match reqwest::get(&url).await {
+                match client::get_block(block_number as u32).await {
                     Ok(response) => {
-                        if let Ok(data) = response.json::<Block<N>>().await {
+                        if let Ok(data) = serde_json::from_value::<Block<N>>(response) {
                             index_data(&data).await;
                         } else {
                             warn!("err parse response!");
@@ -177,6 +174,10 @@ pub async fn sync_data() {
             sleep(Duration::from_micros(50)).await;
         } else {
             sleep(Duration::from_secs(5)).await;
+        }
+
+        if (block_number > latest_height) {
+            latest_height = get_latest_height().await as i64;
         }
     }
 }
@@ -293,7 +294,7 @@ async fn get_latest_height() -> u32 {
     }
 }
 
-async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn Error>> {
+async fn get_next_block_number(init_latest_height: i64) -> Result<i64, Box<dyn Error>> {
     let mut local_latest_height = ANS_BLOCK_HEIGHT_START;
     let db_client = DB_POOL.get().await?;
     let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
@@ -307,8 +308,8 @@ async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn E
     }
 
     let mut latest_height= init_latest_height;
-    if local_latest_height >= init_latest_height as i64 {
-        latest_height = get_latest_height().await;
+    if local_latest_height >= init_latest_height {
+        latest_height = get_latest_height().await as i64;
     }
 
     info!("Latest height: {}", latest_height);
@@ -316,7 +317,7 @@ async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn E
     let height = if latest_height as i64 > local_latest_height {
         local_latest_height + 1
     } else {
-        -1
+        0
     };
     Ok(height)
 }

@@ -54,7 +54,7 @@ jobs:
             type=ref,event=branch,enable=true,priority=600
             type=ref,event=tag,enable=true,priority=600
             type=ref,event=pr,prefix=pr-,enable=true,priority=600
-            type=sha,format=long,prefix=sha-,enable=true,priority=100
+            type=sha,format=long,prefix=sha-,enable=true,priority=900
 
       - name: Build and push Docker image
         id: build-and-push
@@ -94,18 +94,9 @@ jobs:
 
       - name: Update Kustomize image tag
         run: |
-          IMAGE_TAG="${{ needs.build-and-push.outputs.IMAGE_TAG }}"
-          CURRENT_TAG=$(yq '.images[0].newTag' kustomization.yaml)
-          if [ "$IMAGE_TAG" = "$CURRENT_TAG" ]; then
-            echo "Image tag is the same as the current tag. Skipping commit."
-            echo "skip_commit=true" >> $GITHUB_ENV
-          else
-            yq -y -i '.images[0].newTag = "${{ needs.build-and-push.outputs.IMAGE_TAG }}"' kustomization.yaml
-            echo "skip_commit=false" >> $GITHUB_ENV
-          fi
+          yq -y -i '.images[0].newTag = "${{ needs.build-and-push.outputs.IMAGE_TAG }}"' kustomization.yaml
 
       - name: Commit changes
-        if: env.skip_commit != 'true'
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'

@@ -1,5 +1,6 @@
 use reqwest;
 use std::env;
+use std::error::Error;
 use std::time::Duration;
 use regex::Regex;
 use serde::Deserialize;
@@ -7,6 +8,7 @@ use serde::Deserialize;
 use crate::utils;
 
 use reqwest::Client;
+use serde_json::{json, Value};
 // use actix_web::web::Data;
 use tracing::{instrument, warn};
 
@@ -18,7 +20,7 @@ pub struct NameStruct {
 }
 
 fn get_base_uri() -> String {
-    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1".to_string());
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
     let program = env::var("PROGRAM").unwrap_or_else(|_| "aleo_name_service_registry_v1.aleo".to_string());
     let base_uri = format!("{}/program/{}", url_host, program);
     base_uri
@@ -49,6 +51,39 @@ pub(crate) async fn call_api(url: String) -> Result<String, String> {
     }
 
     Ok( resp )
+}
+
+
+pub(crate) async fn call_json_api(url: String) -> Result<Value, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5)) // 设置超时时间为 5 秒
+        .build()
+        .unwrap();
+    // Make the request
+    let resp = client.get(&url).send().await;
+
+    // Check if the request was successful
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(err) => {
+            warn!("Error getting content: {}", err);
+            return Err(err.to_string());
+        }
+    };
+
+    if resp.status().is_success() {
+        match (resp.json().await) {
+            Ok(json) => {
+                Ok(json)
+            },
+            Err(err) => {
+                warn!("Error getting json content: {}", err);
+                Err(err.to_string())
+            }
+        }
+    } else {
+        Err(format!("Failed to get a successful response: {}", resp.status()).into())
+    }
 }
 
 
@@ -213,7 +248,7 @@ pub async fn check_name_hash(name: &String) -> Result<String, String> {
 // }
 #[instrument]
 pub async fn get_last_height() -> Result<u32, String> {
-    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1".to_string());
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
     let url = format!("{}/block/height/latest", url_host);
     let resp = call_api(url).await?;
     let height: u32 = resp.parse().unwrap_or_else(|_| 0);
@@ -230,10 +265,17 @@ pub async fn get_cdn_last_height() -> Result<u32, String> {
 }
 
 
-// pub(crate) async fn is_n_query_from_api(redis_pool: &Pool) -> bool {
-//     let mut conn = redis_pool.get().await.unwrap();
-//     let indexer_height: u32 = cmd("GET").arg(&["indexer:height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
-//     let last_height: u32 = cmd("GET").arg(&["cache:api_height"]).query_async(&mut conn).await.unwrap_or_else(|_| 0);
-//     info!("is_n_query_from_api : {} last_height {}", indexer_height, last_height);
-//     return last_height - indexer_height > 16;
-// }
+#[instrument]
+pub async fn get_blocks(start: u32, end: u32) -> Result<Value, String> {
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
+    let url = format!("{}/blocks?start={}&end={}", url_host, start, end);
+    return call_json_api(url).await;
+}
+
+
+#[instrument]
+pub async fn get_block(height: u32) -> Result<Value, String> {
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
+    let url = format!("{}/block/{}", url_host, height);
+    return call_json_api(url).await;
+}
