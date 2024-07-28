@@ -11,6 +11,7 @@ use base64::encode;
 use reqwest::StatusCode;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use dotenv::dotenv;
+use snarkvm_console_network::{MainnetV0, Network, TestnetV0};
 use tracing::{info, warn};
 use tracing_appender::{non_blocking, rolling};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -336,7 +337,14 @@ async fn main() -> std::io::Result<()> {
         .unwrap();
 
     tokio::spawn(async {
-        indexer::sync_data().await;
+        let net_id:u16 = env::var("NET_ID").unwrap_or_else(|_| "0".to_string()).parse().unwrap();
+        match net_id {
+            MainnetV0::ID => {}
+            TestnetV0::ID => {
+                indexer::sync_data::<TestnetV0>().await;
+            }
+            _ => {}
+        }
     });
 
     tokio::spawn(async {

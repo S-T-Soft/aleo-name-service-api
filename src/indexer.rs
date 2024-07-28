@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use futures::stream::{self, StreamExt};
 use lazy_static::lazy_static;
 use tokio::time::sleep;
-use snarkvm_console_network::{FromBits, TestnetV0, ToBits};
+use snarkvm_console_network::{FromBits, Network, TestnetV0, MainnetV0, ToBits};
 use snarkvm_ledger_block::{Block, Transaction};
 use reqwest;
 use snarkvm_console_network::prelude::ToBytes;
@@ -16,95 +16,37 @@ use tokio_postgres::NoTls;
 use tracing::{error, info, warn};
 use crate::{client, utils};
 
-type N = TestnetV0;
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
 const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org/v1";
-const ANS_BLOCK_HEIGHT_START: i64 = 50092;
+const ANS_BLOCK_HEIGHT_START: i64 = 71078;
+
+#[derive(Debug)]
+struct IndexError(Box<dyn Error>);
 
 lazy_static! {
-    static ref PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"aleo_name_service_registry_v1".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref PROGRAM_ID: Identifier<N> = Identifier::<N>::from_field(&*PROGRAM_ID_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref REGISTER_FIELD: Field<N> = Field::<N>::from_bits_le(&"register".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref REGISTER: Identifier<N> = Identifier::<N>::from_field(&*REGISTER_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref REGISTER_TLD_FIELD: Field<N> = Field::<N>::from_bits_le(&"register_tld".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref REGISTER_TLD: Identifier<N> = Identifier::<N>::from_field(&*REGISTER_TLD_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref REGISTER_PRIVATE_FIELD: Field<N> = Field::<N>::from_bits_le(&"register_private".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref REGISTER_PRIVATE: Identifier<N> = Identifier::<N>::from_field(&*REGISTER_PRIVATE_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref REGISTER_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"register_public".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref REGISTER_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*REGISTER_PUBLIC_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref TRANSFER_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_public".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref TRANSFER_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_PUBLIC_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref CONVERT_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_private_to_public".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref CONVERT_PRIVATE_TO_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*CONVERT_PUBLIC_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref CONVERT_PRIVATE_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_public_to_private".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref CONVERT_PUBLIC_TO_PRIVATE: Identifier<N> = Identifier::<N>::from_field(&*CONVERT_PRIVATE_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref TRANSFER_FROM_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_from_public".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref TRANSFER_FROM_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_FROM_PUBLIC_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref SET_PRIMARY_NAME_FIELD: Field<N> = Field::<N>::from_bits_le(&"set_primary_name".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref SET_PRIMARY_NAME: Identifier<N> = Identifier::<N>::from_field(&*SET_PRIMARY_NAME_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref UNSET_PRIMARY_NAME_FIELD: Field<N> = Field::<N>::from_bits_le(&"unset_primary_name".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref UNSET_PRIMARY_NAME: Identifier<N> = Identifier::<N>::from_field(&*UNSET_PRIMARY_NAME_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref SET_RESOLVER_FIELD: Field<N> = Field::<N>::from_bits_le(&"set_resolver".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref SET_RESOLVER: Identifier<N> = Identifier::<N>::from_field(&*SET_RESOLVER_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref BURN_FIELD: Field<N> = Field::<N>::from_bits_le(&"burn".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref BURN: Identifier<N> = Identifier::<N>::from_field(&*BURN_FIELD)
-        .expect("Failed to create Identifier from Field");
+    static ref PROGRAM_ID: &'static str = "aleo_name_service_registry_v1";
+    static ref REGISTER: &'static str = "register";
+    static ref REGISTER_TLD: &'static str = "register_tld";
+    static ref REGISTER_PRIVATE: &'static str = "register_private";
+    static ref REGISTER_PUBLIC: &'static str = "register_public";
+    static ref TRANSFER_PUBLIC: &'static str = "transfer_public";
+    static ref CONVERT_PRIVATE_TO_PUBLIC: &'static str = "transfer_private_to_public";
+    static ref CONVERT_PUBLIC_TO_PRIVATE: &'static str = "transfer_public_to_private";
+    static ref TRANSFER_FROM_PUBLIC: &'static str = "transfer_from_public";
+    static ref SET_PRIMARY_NAME: &'static str = "set_primary_name";
+    static ref UNSET_PRIMARY_NAME: &'static str = "unset_primary_name";
+    static ref SET_RESOLVER: &'static str = "set_resolver";
+    static ref BURN: &'static str = "burn";
 
-    static ref RECORD_PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"ans_resolver_v1".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref RECORD_PROGRAM_ID: Identifier<N> = Identifier::<N>::from_field(&*RECORD_PROGRAM_ID_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref SET_RESOLVER_RECORD_FIELD: Field<N> = Field::<N>::from_bits_le(&"set_resolver_record".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref SET_RESOLVER_RECORD: Identifier<N> = Identifier::<N>::from_field(&*SET_RESOLVER_RECORD_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref UNSET_RESOLVER_RECORD_FIELD: Field<N> = Field::<N>::from_bits_le(&"unset_resolver_record".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref UNSET_RESOLVER_RECORD: Identifier<N> = Identifier::<N>::from_field(&*UNSET_RESOLVER_RECORD_FIELD)
-        .expect("Failed to create Identifier from Field");
+    static ref RECORD_PROGRAM_ID: &'static str = "ans_resolver_v1";
+    static ref SET_RESOLVER_RECORD: &'static str = "set_resolver_record";
+    static ref UNSET_RESOLVER_RECORD: &'static str = "unset_resolver_record";
 
-    static ref TRANSFER_PROGRAM_ID_FIELD: Field<N> = Field::<N>::from_bits_le(&"ans_credit_transfer_v1".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref TRANSFER_PROGRAM_ID: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_PROGRAM_ID_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref TRANSFER_CREDITS_FIELD: Field<N> = Field::<N>::from_bits_le(&"transfer_credits".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref TRANSFER_CREDITS: Identifier<N> = Identifier::<N>::from_field(&*TRANSFER_CREDITS_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref CLAIM_CREDITS_PUBLIC_FIELD: Field<N> = Field::<N>::from_bits_le(&"claim_credits_public".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref CLAIM_CREDITS_PUBLIC: Identifier<N> = Identifier::<N>::from_field(&*CLAIM_CREDITS_PUBLIC_FIELD)
-        .expect("Failed to create Identifier from Field");
-    static ref CLAIM_CREDITS_PRIVATE_FIELD: Field<N> = Field::<N>::from_bits_le(&"claim_credits_private".as_bytes().to_bits_le())
-        .expect("Failed to create Field from bits");
-    static ref CLAIM_CREDITS_PRIVATE: Identifier<N> = Identifier::<N>::from_field(&*CLAIM_CREDITS_PRIVATE_FIELD)
-        .expect("Failed to create Identifier from Field");
+    static ref TRANSFER_PROGRAM_ID: &'static str = "ans_credit_transfer_v1";
+    static ref TRANSFER_CREDITS: &'static str = "transfer_credits";
+    static ref CLAIM_CREDITS_PUBLIC: &'static str = "claim_credits_public";
+    static ref CLAIM_CREDITS_PRIVATE: &'static str = "claim_credits_private";
 
     static ref DB_POOL: deadpool_postgres::Pool = {
         let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
@@ -117,9 +59,6 @@ lazy_static! {
     };
 }
 
-#[derive(Debug)]
-struct IndexError(Box<dyn Error>);
-
 impl fmt::Display for IndexError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "IndexError Error: {}", self.0)
@@ -128,7 +67,7 @@ impl fmt::Display for IndexError {
 
 impl Error for IndexError {}
 
-pub async fn sync_data() {
+pub async fn sync_data<N: Network>() {
     let latest_height = get_latest_height().await;
     // match sync_from_cdn(latest_height).await {
     //     Ok(_) => info!("sync from cdn finished!"),
@@ -148,6 +87,7 @@ pub async fn sync_data() {
             let url = format!("{}/block/{}", url_pre, block_number);
             if (latest_height as i64 - block_number) > 10 {
                 let url_batch = format!("{}/blocks?start={}&end={}", url_pre, block_number, block_number + 10);
+                info!("fetching batch: {}", url_batch);
                 match reqwest::get(&url_batch).await {
                     Ok(response) => {
                         if let Ok(datas) = response.json::<Vec<Block<N>>>().await {
@@ -321,7 +261,7 @@ async fn get_next_block_number(init_latest_height: u32) -> Result<i64, Box<dyn E
     Ok(height)
 }
 
-async fn index_data(block: &Block<N>) {
+async fn index_data<N: Network>(block: &Block<N>) {
     info!("Process block {} on {}", block.height(), block.timestamp());
     let mut db_client = DB_POOL.get().await.unwrap();
     let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
@@ -334,38 +274,40 @@ async fn index_data(block: &Block<N>) {
     for transaction in block.transactions().clone().into_iter() {
         if transaction.is_accepted() {
             for transition in transaction.transitions() {
-                if transition.program_id().name() == &*PROGRAM_ID {
-                    info!("process transition {}, function name: {}", transition.id(), transition.function_name());
-                    match transition.function_name() {
-                        name if name == &*REGISTER => register(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*REGISTER_TLD => register_tld(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*REGISTER_PRIVATE => register(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*REGISTER_PUBLIC => register(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*CONVERT_PRIVATE_TO_PUBLIC => convert_private_to_public(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*CONVERT_PUBLIC_TO_PRIVATE => convert_public_to_private(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*TRANSFER_FROM_PUBLIC => transfer_from_public(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*TRANSFER_PUBLIC => transfer_public(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*SET_RESOLVER => set_resolver(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*BURN => burn(&db_trans, &block, &transaction, transition).await,
+                let a = transition.program_id().name().to_string();
+                let b = *PROGRAM_ID;
+                if transition.program_id().name().to_string() == *PROGRAM_ID {
+                    info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
+                    match transition.function_name().to_string() {
+                        name if name == *REGISTER => register(&db_trans, &block, &transaction, transition).await,
+                        name if name == *REGISTER_TLD => register_tld(&db_trans, &block, &transaction, transition).await,
+                        name if name == *REGISTER_PRIVATE => register(&db_trans, &block, &transaction, transition).await,
+                        name if name == *REGISTER_PUBLIC => register(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CONVERT_PRIVATE_TO_PUBLIC => convert_private_to_public(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CONVERT_PUBLIC_TO_PRIVATE => convert_public_to_private(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_FROM_PUBLIC => transfer_from_public(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_PUBLIC => transfer_public(&db_trans, &block, &transaction, transition).await,
+                        name if name == *SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await,
+                        name if name == *UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await,
+                        name if name == *SET_RESOLVER => set_resolver(&db_trans, &block, &transaction, transition).await,
+                        name if name == *BURN => burn(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
-                else if transition.program_id().name() == &*TRANSFER_PROGRAM_ID {
-                    info!("process transition {}, function name: {}", transition.id(), transition.function_name());
-                    match transition.function_name() {
-                        name if name == &*TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
+                else if transition.program_id().name().to_string() == *TRANSFER_PROGRAM_ID {
+                    info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
+                    match transition.function_name().to_string() {
+                        name if name == *TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
-                else if transition.program_id().name() == &*RECORD_PROGRAM_ID {
-                    info!("process transition {}, function name: {}", transition.id(), transition.function_name());
-                    match transition.function_name() {
-                        name if name == &*SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await,
-                        name if name == &*UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
+                else if transition.program_id().name().to_string() == *RECORD_PROGRAM_ID {
+                    info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
+                    match transition.function_name().to_string() {
+                        name if name == *SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == *UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
@@ -379,7 +321,7 @@ async fn index_data(block: &Block<N>) {
 /**
 process all register transition
  **/
-async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn register<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -416,7 +358,7 @@ async fn register(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, 
 
 }
 
-async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn register_tld<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -447,7 +389,7 @@ async fn register_tld(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
 
 }
 
-async fn convert_private_to_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn convert_private_to_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -469,7 +411,7 @@ async fn convert_private_to_public(db_trans: &tokio_postgres::Transaction<'_>, b
     };
 }
 
-async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn convert_public_to_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -495,7 +437,7 @@ async fn convert_public_to_private(db_trans: &tokio_postgres::Transaction<'_>, b
     };
 }
 
-async fn transfer_from_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_from_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -526,7 +468,7 @@ async fn transfer_from_public(db_trans: &tokio_postgres::Transaction<'_>, block:
     };
 }
 
-async fn transfer_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -564,7 +506,7 @@ async fn transfer_public(db_trans: &tokio_postgres::Transaction<'_>, block: &Blo
     };
 }
 
-async fn set_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn set_primary_name<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -587,7 +529,7 @@ async fn set_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
     };
 }
 
-async fn unset_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn unset_primary_name<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -604,7 +546,7 @@ async fn unset_primary_name(db_trans: &tokio_postgres::Transaction<'_>, block: &
     };
 }
 
-async fn set_resolver(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn set_resolver<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -628,7 +570,7 @@ async fn set_resolver(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<
     };
 }
 
-async fn set_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn set_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -663,7 +605,7 @@ async fn set_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: 
 
 }
 
-async fn unset_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn unset_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -694,7 +636,7 @@ async fn unset_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
     };
 }
 
-async fn clear_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn clear_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -717,7 +659,7 @@ async fn clear_resolver_record(db_trans: &tokio_postgres::Transaction<'_>, block
     };
 }
 
-async fn burn(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn burn<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -734,7 +676,7 @@ async fn burn(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, tran
     };
 }
 
-async fn transfer_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -756,7 +698,7 @@ async fn transfer_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
     };
 }
 
-async fn claim_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn claim_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -777,7 +719,7 @@ async fn claim_credits(db_trans: &tokio_postgres::Transaction<'_>, block: &Block
     };
 }
 
-fn parse_str_name_struct(name_arg: &Argument<N>) -> Result<String, String> {
+fn parse_str_name_struct<N: Network>(name_arg: &Argument<N>) -> Result<String, String> {
     let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
     let mut name: [u8; 64] = [0; 64];
 
@@ -790,7 +732,7 @@ fn parse_str_name_struct(name_arg: &Argument<N>) -> Result<String, String> {
 }
 
 // parse argument
-fn parse_str_4u128(name_arg: &Argument<N>) -> Result<String, String> {
+fn parse_str_4u128<N: Network>(name_arg: &Argument<N>) -> Result<String, String> {
     let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
     let mut name: [u8; 64] = [0; 64];
 
@@ -802,7 +744,7 @@ fn parse_str_4u128(name_arg: &Argument<N>) -> Result<String, String> {
     Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
 }
 
-fn parse_str_8u128(name_arg: &Argument<N>) -> Result<String, String> {
+fn parse_str_8u128<N: Network>(name_arg: &Argument<N>) -> Result<String, String> {
     let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
     let mut name: [u8; 128] = [0; 128];
 
@@ -818,7 +760,7 @@ fn parse_str_8u128(name_arg: &Argument<N>) -> Result<String, String> {
     Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
 }
 
-fn parse_str_u128(name_arg: &Argument<N>) -> Result<String, String> {
+fn parse_str_u128<N: Network>(name_arg: &Argument<N>) -> Result<String, String> {
     let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
     let mut name: [u8; 16] = [0; 16];
 
@@ -826,7 +768,7 @@ fn parse_str_u128(name_arg: &Argument<N>) -> Result<String, String> {
     Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
 }
 
-fn parse_field(field_arg: &Argument<N>) -> Result<String, String> {
+fn parse_field<N: Network>(field_arg: &Argument<N>) -> Result<String, String> {
     let field_arg_bytes = Argument::to_bytes_le(field_arg).unwrap();
 
     if field_arg_bytes.len() >= 32 {
@@ -837,7 +779,7 @@ fn parse_field(field_arg: &Argument<N>) -> Result<String, String> {
     }
 }
 
-fn parse_address(address_arg: &Argument<N>) -> Result<String, String> {
+fn parse_address<N: Network>(address_arg: &Argument<N>) -> Result<String, String> {
     let address_arg_bytes = Argument::to_bytes_le(address_arg).unwrap();
 
     if address_arg_bytes.len() >= 32 {
@@ -848,7 +790,7 @@ fn parse_address(address_arg: &Argument<N>) -> Result<String, String> {
     }
 }
 
-fn parse_u64(u64_arg: &Argument<N>) -> Result<u64, String> {
+fn parse_u64<N: Network>(u64_arg: &Argument<N>) -> Result<u64, String> {
     let u64_arg_bytes = Argument::to_bytes_le(u64_arg).unwrap();
 
     if u64_arg_bytes.len() >= 8 {
@@ -867,7 +809,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_u64() {
+    fn test_parse_u64<N: Network>() {
         let u64_val = Value::<N>::from_str("100u64").unwrap();
         let u64_arg = Argument::<N>::Plaintext(Plaintext::<N>::from_fields(&u64_val.to_fields().unwrap()).unwrap());
         let result = parse_u64(&u64_arg);
@@ -875,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_address() {
+    fn test_parse_address<N: Network>() {
         let address_val = Value::<N>::from_str("aleo1q6qstg8q8shwqf5m6q5fcenuwsdqsvp4hhsgfnx5chzjm3secyzqt9mxm8").unwrap();
         let address_arg = Argument::<N>::Plaintext(Plaintext::<N>::from_fields(&address_val.to_fields().unwrap()).unwrap());
         let result = parse_address(&address_arg);
