@@ -8,4 +8,4 @@ resources:
 images:
   - name: indexer-api
     newName: ghcr.io/s-t-soft/aleo-name-service-api
-    newTag: beta
+    newTag: sha-ea008f3805d5fee630673f9b05415057a4f90464
