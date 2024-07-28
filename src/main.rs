@@ -337,9 +337,11 @@ async fn main() -> std::io::Result<()> {
         .unwrap();
 
     tokio::spawn(async {
-        let net_id:u16 = env::var("NET_ID").unwrap_or_else(|_| "0".to_string()).parse().unwrap();
+        let net_id:u16 = env::var("NET_ID").unwrap_or_else(|_| "1".to_string()).parse().unwrap();
         match net_id {
-            MainnetV0::ID => {}
+            MainnetV0::ID => {
+                indexer::sync_data::<MainnetV0>().await;
+            }
             TestnetV0::ID => {
                 indexer::sync_data::<TestnetV0>().await;
             }
