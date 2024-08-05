@@ -9,7 +9,6 @@ services:
       - POSTGRES_PASSWORD=ansPwd
       - POSTGRES_USER=ansUsr
       - PUID=1000
-      - TZ=Asia/Shanghai
     image: postgres:15.3
     ports:
       - "5432:5432"
@@ -23,11 +22,12 @@ services:
       context: ./
       dockerfile: Dockerfile
     depends_on:
-      - redis
       - postgresql
     environment:
-      URL_HOST: https://api.explorer.aleo.org/v1
+      URL_HOST: https://api.explorer.aleo.org/v1/testnet
+      URL_HOSTS: https://api.explorer.aleo.org/v1/testnet
       PROGRAM: aleo_name_service_registry_v1.aleo
+      NET_ID: 1
       DATABASE_URL: postgresql://ansUsr:ansPwd@postgresql:5432/ans
       VIRTUAL_HOST: api.aleonames.local
       LOG_STORE: ans

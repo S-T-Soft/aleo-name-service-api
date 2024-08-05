@@ -72,12 +72,16 @@ This API endpoint return the server statuses
 ## Running the server
 
 ### Local host
-Start PostgresQL with init.sql and Redis before running the program.
+Start PostgresQL with init.sql before running the program.
 To start the server in local, run the following command:
 
 ```bash
-export REDIS_URL=redis://locahost:6379/0
 export DATABASE_URL=postgresql://user:pwd@locahost:5432/ans
+export URL_HOST=https://api.explorer.aleo.org/v1/testnet
+# Can set more API URL to URL_HOSTS, split by ','
+export URL_HOSTS=https://api.explorer.aleo.org/v1/testnet
+# export NET_ID=0 for mainnet
+export NET_ID=1
 cargo run
 ```
 
