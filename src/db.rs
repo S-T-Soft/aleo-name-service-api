@@ -2,7 +2,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::env;
 use actix_web::web::Data;
 use deadpool_postgres::{Manager, Object, Pool};
-use lazy_static::lazy_static;
 use tokio_postgres::Error;
 use tracing::{debug, info};
 use crate::models::*;

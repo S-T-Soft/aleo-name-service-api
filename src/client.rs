@@ -72,7 +72,7 @@ pub(crate) async fn call_json_api(url: String) -> Result<Value, String> {
     };
 
     if resp.status().is_success() {
-        match (resp.json().await) {
+        match resp.json().await {
             Ok(json) => {
                 Ok(json)
             },

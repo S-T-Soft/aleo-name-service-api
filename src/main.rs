@@ -336,18 +336,22 @@ async fn main() -> std::io::Result<()> {
         .finish()
         .unwrap();
 
-    tokio::spawn(async {
-        let net_id:u16 = env::var("NET_ID").unwrap_or_else(|_| "1".to_string()).parse().unwrap();
-        match net_id {
-            MainnetV0::ID => {
-                indexer::sync_data::<MainnetV0>().await;
+    let run_indexer = env::var("RUN_INDEXER").unwrap_or_else(|_| "true".to_string());
+
+    if run_indexer.to_lowercase() == "true" {
+        tokio::spawn(async {
+            let net_id: u16 = env::var("NET_ID").unwrap_or_else(|_| "1".to_string()).parse().unwrap();
+            match net_id {
+                MainnetV0::ID => {
+                    indexer::sync_data::<MainnetV0>().await;
+                }
+                TestnetV0::ID => {
+                    indexer::sync_data::<TestnetV0>().await;
+                }
+                _ => {}
             }
-            TestnetV0::ID => {
-                indexer::sync_data::<TestnetV0>().await;
-            }
-            _ => {}
-        }
-    });
+        });
+    }
 
     tokio::spawn(async {
         job::run().await;

@@ -3,14 +3,12 @@ use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
-use futures::stream::{self, StreamExt};
 use lazy_static::lazy_static;
 use tokio::time::sleep;
-use snarkvm_console_network::{FromBits, Network, TestnetV0, MainnetV0, ToBits};
+use snarkvm_console_network::Network;
 use snarkvm_ledger_block::{Block, Transaction};
-use reqwest;
 use snarkvm_console_network::prelude::ToBytes;
-use snarkvm_console_program::{Field, Address, Identifier, FromField, Argument, FromBytes};
+use snarkvm_console_program::{Field, Address, Argument, FromBytes};
 use snarkvm_ledger_block::{Transition};
 use tokio_postgres::NoTls;
 use tracing::{error, info, warn};
@@ -18,8 +16,7 @@ use crate::{client, utils};
 
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
-const DEFAULT_API_PRE: &str = "https://api.explorer.aleo.org/v1";
-const ANS_BLOCK_HEIGHT_START: i64 = 71078;
+const ANS_BLOCK_HEIGHT_START: i64 = 1;
 
 #[derive(Debug)]
 struct IndexError(Box<dyn Error>);
@@ -68,6 +65,7 @@ impl fmt::Display for IndexError {
 impl Error for IndexError {}
 
 pub async fn sync_data<N: Network>() {
+    info!("Start data indexer...");
     let mut latest_height = get_latest_height().await as i64;
     // match sync_from_cdn(latest_height).await {
     //     Ok(_) => info!("sync from cdn finished!"),
@@ -115,7 +113,7 @@ pub async fn sync_data<N: Network>() {
             sleep(Duration::from_secs(5)).await;
         }
 
-        if (block_number > latest_height) {
+        if block_number > latest_height {
             latest_height = get_latest_height().await as i64;
         }
     }
@@ -274,8 +272,6 @@ async fn index_data<N: Network>(block: &Block<N>) {
     for transaction in block.transactions().clone().into_iter() {
         if transaction.is_accepted() {
             for transition in transaction.transitions() {
-                let a = transition.program_id().name().to_string();
-                let b = *PROGRAM_ID;
                 if transition.program_id().name().to_string() == *PROGRAM_ID {
                     info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
                     match transition.function_name().to_string() {
@@ -633,29 +629,6 @@ async fn unset_resolver_record<N: Network>(db_trans: &tokio_postgres::Transactio
         info!("unset_resolver_record: {} {} {} {}", owner, name_hash, category, version)
     } else {
         error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id())
-    };
-}
-
-async fn clear_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
-    let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
-    if let Some(may_future) = outs_last.future() {
-        let args = may_future.arguments();
-        let name_hash_arg = args.get(0).unwrap();
-        let owner_arg = args.get(1).unwrap();
-
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let owner = parse_address(owner_arg).unwrap();
-
-        let version = 1;
-        db_trans.execute("INSERT INTO ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
-                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-
-        info!("clear_resolver_record: {} {} {}", owner, name_hash, version)
-    } else {
-        error!("clear_resolver_record: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
