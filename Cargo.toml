@@ -10,10 +10,10 @@ actix-web = "4.5.1"
 actix-cors = "0.6.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.64"
-snarkvm-console-program = { git = "https://github.com/AleoNet/snarkVM", rev = "d170a9f" }
-snarkvm-console-network = { git = "https://github.com/AleoNet/snarkVM", rev = "d170a9f" }
-snarkvm-ledger-block = { git = "https://github.com/AleoNet/snarkVM", rev = "d170a9f" }
-snarkos-node-cdn = { git = "https://github.com/AleoNet/snarkOS", tag = "testnet-beta" }
+snarkvm-console-program = { git = "https://github.com/AleoNet/snarkVM", tag = "testnet-beta-v0.4.0" }
+snarkvm-console-network = { git = "https://github.com/AleoNet/snarkVM", tag = "testnet-beta-v0.4.0" }
+snarkvm-ledger-block = { git = "https://github.com/AleoNet/snarkVM", tag = "testnet-beta-v0.4.0" }
+snarkos-node-cdn = { git = "https://github.com/AleoNet/snarkOS", tag = "testnet-beta-v0.4.0" }
 reqwest = { version = "0.11", features = ["json"] }
 lazy_static = "1.4.0"
 regex = "1.5.4"
