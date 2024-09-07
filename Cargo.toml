@@ -6,26 +6,26 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix-web = "4.5.1"
-actix-cors = "0.6.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.64"
-snarkvm-console-program = { git = "https://github.com/AleoNet/snarkVM", tag = "testnet-beta-v0.4.0" }
-snarkvm-console-network = { git = "https://github.com/AleoNet/snarkVM", tag = "testnet-beta-v0.4.0" }
-snarkvm-ledger-block = { git = "https://github.com/AleoNet/snarkVM", tag = "testnet-beta-v0.4.0" }
-snarkos-node-cdn = { git = "https://github.com/AleoNet/snarkOS", tag = "testnet-beta-v0.4.0" }
+actix-web = "4.9.0"
+actix-cors = "0.6.5"
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+snarkvm-console-program = { git = "https://github.com/AleoNet/snarkVM", tag = "mainnet-beta-v0.1.0" }
+snarkvm-console-network = { git = "https://github.com/AleoNet/snarkVM", tag = "mainnet-beta-v0.1.0" }
+snarkvm-ledger-block = { git = "https://github.com/AleoNet/snarkVM", tag = "mainnet-beta-v0.1.0" }
+snarkos-node-cdn = { git = "https://github.com/AleoNet/snarkOS", tag = "mainnet-beta-v0.1.0" }
 reqwest = { version = "0.11", features = ["json"] }
-lazy_static = "1.4.0"
-regex = "1.5.4"
-urlencoding = "2.1.2"
+lazy_static = "1.5.0"
+regex = "1.10.6"
+urlencoding = "2.1.3"
 tokio = { version = "1", features = ["full"] }
-tokio-postgres = "0.7.10"
+tokio-postgres = "0.7.11"
 deadpool-postgres = "0.11.0"
 prometheus = "0.13.3"
 actix-web-prom = "0.7.0"
 futures-util = "0.3.28"
 base64 = "0.13"
-time = { version = "0.3.23", features = [] }
+time = { version = "0.3.36", features = [] }
 url = "2.4.0"
 once_cell = "1.18.0"
 futures = "0.3.28"

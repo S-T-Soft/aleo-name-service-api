@@ -1,6 +1,8 @@
 create schema ansb;
 
-create table ansb.block
+set search_path to ansb;
+
+create table block
 (
     id            serial,
     height        bigint,
@@ -13,7 +15,7 @@ create table ansb.block
         unique (height)
 );
 
-create table ansb.ans_nft_owner
+create table ans_nft_owner
 (
     id         bigserial,
     name_hash  text not null,
@@ -26,9 +28,9 @@ create table ansb.ans_nft_owner
 );
 
 create index name_address_index
-    on ansb.ans_nft_owner (address);
+    on ans_nft_owner (address);
 
-create table ansb.ans_name
+create table ans_name
 (
     id         bigserial,
     name_hash  text          not null,
@@ -45,7 +47,7 @@ create table ansb.ans_name
 );
 
 
-create table ansb.ans_primary_name
+create table ans_primary_name
 (
     id         bigserial,
     address    text not null,
@@ -57,7 +59,7 @@ create table ansb.ans_primary_name
         unique (address)
 );
 
-create table ansb.ans_resolver
+create table ans_resolver
 (
     id         bigserial,
     name_hash  text      not null,
@@ -71,7 +73,7 @@ create table ansb.ans_resolver
         unique (name_hash, category, version)
 );
 
-create table ansb.ans_name_version
+create table ans_name_version
 (
     id         bigserial,
     name_hash  text      not null,
@@ -83,7 +85,7 @@ create table ansb.ans_name_version
         unique (name_hash)
 );
 
-create table ansb.domain_credits
+create table domain_credits
 (
     id         bigserial,
     transfer_key  text      not null,
@@ -95,7 +97,7 @@ create table ansb.domain_credits
         unique (transfer_key)
 );
 
-create table ansb.kv
+create table kv
 (
     key    text,
     value  text,

@@ -26,7 +26,7 @@ services:
     environment:
       URL_HOST: https://api.explorer.aleo.org/v1/testnet
       URL_HOSTS: https://api.explorer.aleo.org/v1/testnet
-      PROGRAM: aleo_name_service_registry_v1.aleo
+      PROGRAM: aleo_name_service_registry.aleo
       NET_ID: 1
       DATABASE_URL: postgresql://ansUsr:ansPwd@postgresql:5432/ans
       VIRTUAL_HOST: api.aleonames.local

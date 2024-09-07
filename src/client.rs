@@ -21,7 +21,7 @@ pub struct NameStruct {
 
 fn get_base_uri() -> String {
     let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
-    let program = env::var("PROGRAM").unwrap_or_else(|_| "aleo_name_service_registry_v1.aleo".to_string());
+    let program = env::var("PROGRAM").unwrap_or_else(|_| "aleo_name_service_registry.aleo".to_string());
     let base_uri = format!("{}/program/{}", url_host, program);
     base_uri
 }

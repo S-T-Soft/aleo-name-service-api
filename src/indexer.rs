@@ -22,7 +22,7 @@ const ANS_BLOCK_HEIGHT_START: i64 = 1;
 struct IndexError(Box<dyn Error>);
 
 lazy_static! {
-    static ref PROGRAM_ID: &'static str = "aleo_name_service_registry_v1";
+    static ref PROGRAM_ID: &'static str = "aleo_name_service_registry";
     static ref REGISTER: &'static str = "register";
     static ref REGISTER_TLD: &'static str = "register_tld";
     static ref REGISTER_PRIVATE: &'static str = "register_private";
@@ -36,11 +36,11 @@ lazy_static! {
     static ref SET_RESOLVER: &'static str = "set_resolver";
     static ref BURN: &'static str = "burn";
 
-    static ref RECORD_PROGRAM_ID: &'static str = "ans_resolver_v1";
+    static ref RECORD_PROGRAM_ID: &'static str = "ans_resolver";
     static ref SET_RESOLVER_RECORD: &'static str = "set_resolver_record";
     static ref UNSET_RESOLVER_RECORD: &'static str = "unset_resolver_record";
 
-    static ref TRANSFER_PROGRAM_ID: &'static str = "ans_credit_transfer_v1";
+    static ref TRANSFER_PROGRAM_ID: &'static str = "ans_credit_transfer";
     static ref TRANSFER_CREDITS: &'static str = "transfer_credits";
     static ref CLAIM_CREDITS_PUBLIC: &'static str = "claim_credits_public";
     static ref CLAIM_CREDITS_PRIVATE: &'static str = "claim_credits_private";
