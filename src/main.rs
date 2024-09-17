@@ -386,6 +386,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)
             .service(hash_to_name)
+            .service(field_to_name)
             .service(name_api)
             .service(address_api)
             .service(resolver)
