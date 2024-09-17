@@ -2,39 +2,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::cmp::min;
 use std::str::FromStr;
 use lazy_static::lazy_static;
-use snarkvm_console_program::{Field, ToBits, Value};
+use snarkvm_console_program::{Field, Scalar, ToBits, Value};
 use snarkvm_console_network::prelude::Zero;
-use snarkvm_console_network::{Network, TestnetV0, ToFields};
+use snarkvm_console_network::{MainnetV0, Network, TestnetV0, ToFields};
 use tracing::info;
 
-type N = TestnetV0;
+type N = MainnetV0;
 
 lazy_static! {
     static ref EMPTY_U128_ARR: Vec<Field<N>> = Value::<N>::try_from("[0u128, 0u128]").unwrap().to_fields().unwrap();
 }
-
-// pub fn string_to_u128(s: &str) -> Result<u128, String> {
-//     // Check if all characters are valid
-//     if !s.chars().all(|c| c.is_ascii_lowercase() || c.is_digit(10) || c == '-' || c == '_') {
-//         return Err("Invalid character found".to_string());
-//     }
-
-//     let mut bytes = s.as_bytes().to_vec();
-
-//     if bytes.len() > 16 {
-//         return Err("The string is too long".to_string());
-//     }
-
-//     // Pad the vector with zeros
-//     while bytes.len() < 16 {
-//         bytes.push(0);
-//     }
-
-//     let mut bits = [0u8; 16];
-//     bits.copy_from_slice(&bytes);
-
-//     Ok( u128::from_le_bytes([bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7], bits[8], bits[9], bits[10], bits[11], bits[12], bits[13], bits[14], bits[15]]) )
-// }
 
 // Parse a name
 pub fn parse_label_string(name: &str, valid: bool) -> Result<String, String> {
@@ -79,6 +56,15 @@ pub fn parse_label(name: &str, parent: Field<N>) -> Result<Value<N>, String> {
     Ok (Value::<N>::try_from(&names).map_err(|e| e.to_string())?)
 }
 
+pub fn parse_name_hash_from_name_field(name_field: &str) -> Result<Field<N>, String> {
+    let data = format!("{{metadata: [{}, 0field, 0field, 0field]}}", &name_field);
+    let data_value = Value::<N>::try_from(&data).map_err(|e| e.to_string())?;
+    let data_hash = N::hash_bhp256(&data_value.to_bits_le()).map_err(|e| e.to_string())?;
+    let adata_hash = Value::<N>::try_from(data_hash.to_string()).map_err(|e| e.to_string())?;
+    let name_hash = N::hash_bhp256(&adata_hash.to_bits_le()).map_err(|e| e.to_string())?;
+    Ok (name_hash)
+}
+
 // Parse a name to hash
 pub fn parse_name_hash(name: &str) -> Result<Field<N>, String> {
     // split name with dot，revert the order
@@ -90,6 +76,7 @@ pub fn parse_name_hash(name: &str) -> Result<Field<N>, String> {
         let label = parse_label(part, name_hash)?;
         let avalue = label.to_fields().map_err(|e| e.to_string())?;
         name_hash = N::hash_psd2(&avalue).map_err(|e| e.to_string())?;
+        name_hash = parse_name_hash_from_name_field(&name_hash.to_string())?;
     }
     Ok(name_hash)
 }
@@ -105,22 +92,6 @@ pub fn get_name_hash_transfer_key(name_hash: &str) -> Result<Field<N>, String> {
     let name_hash = Value::<N>::from_str(&name_hash).unwrap();
     Ok(N::commit_bhp256(&name_hash.to_bits_le(), &salt).unwrap())
 }
-
-
-// pub fn reverse_parse_label(n1: u128, n2: u128, n3: u128, n4: u128) -> Result<String, String> {
-//     let mut bytes = [0u8; 64];
-//
-//     bytes[0..16].copy_from_slice(&n1.to_le_bytes());
-//     bytes[16..32].copy_from_slice(&n2.to_le_bytes());
-//     bytes[32..48].copy_from_slice(&n3.to_le_bytes());
-//     bytes[48..64].copy_from_slice(&n4.to_le_bytes());
-//
-//     let mut name = String::from_utf8(bytes.to_vec()).map_err(|_| "Failed to convert bytes to UTF-8")?;
-//
-//     name = name.trim_end_matches(char::from(0)).to_string();
-//
-//     Ok(name)
-// }
 
 pub fn split_string(input: &str) -> Vec<&str> {
     let mut result = Vec::new();
@@ -149,6 +120,31 @@ mod tests {
         match get_name_transfer_key(&name) {
             Ok(value) => assert_eq!(value.to_string(), expected, "key not equal"),
             Err(e) => assert!(false, "Expected Ok, got Err {}", e),
+        }
+    }
+
+    #[test]
+    fn test_parse_label_valid() {
+        let name = "888";
+        let parent = Field::<N>::zero();
+        let expected = "{\n  name: [\n    3684408u128,\n    0u128,\n    0u128,\n    0u128\n  ],\n  parent: 0field\n}";
+        match parse_label(&name, parent) {
+            Ok(value) => assert_eq!(value.to_string(), expected, "key not equal"),
+            Err(e) => assert!(false, "Expected Ok, got Err {}", e),
+        }
+    }
+
+    #[test]
+    fn test_parse_name_hash_valid() {
+        // match a list of ans names
+        let names = vec![
+            ("ans", "559532657689873513833888656958509165446284001025178663602770230581478239512field"),
+            ("888.ans", "2604935846435951371571786892598308200492008407434453620755949963164833092446field")];
+        for (name, expected) in names {
+            match parse_name_hash(&name) {
+                Ok(value) => assert_eq!(value.to_string(), expected, "key not equal"),
+                Err(e) => assert!(false, "Expected Ok, got Err {}", e),
+            }
         }
     }
 }

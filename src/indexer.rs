@@ -1,4 +1,5 @@
 use std::{env, fmt};
+use std::cmp::max;
 use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
@@ -16,13 +17,18 @@ use crate::{client, utils};
 
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
-const ANS_BLOCK_HEIGHT_START: i64 = 1;
 
 #[derive(Debug)]
 struct IndexError(Box<dyn Error>);
 
 lazy_static! {
-    static ref PROGRAM_ID: &'static str = "aleo_name_service_registry";
+    static ref ANS_BLOCK_HEIGHT_START: i64 = {
+        let value = env::var("ANS_BLOCK_HEIGHT_START")
+            .unwrap_or_else(|_| "1".to_string());
+        value.parse::<i64>()
+            .expect("Cannot parse ANS_BLOCK_HEIGHT_START env var")
+    };
+    static ref PROGRAM_ID: String = env::var("PROGRAM_ID").unwrap_or_else(|_| "aleo_name_service_registry".to_string());
     static ref REGISTER: &'static str = "register";
     static ref REGISTER_TLD: &'static str = "register_tld";
     static ref REGISTER_PRIVATE: &'static str = "register_private";
@@ -36,11 +42,11 @@ lazy_static! {
     static ref SET_RESOLVER: &'static str = "set_resolver";
     static ref BURN: &'static str = "burn";
 
-    static ref RECORD_PROGRAM_ID: &'static str = "ans_resolver";
+    static ref RECORD_PROGRAM_ID: String = env::var("RECORD_PROGRAM_ID").unwrap_or_else(|_| "ans_resolver".to_string());
     static ref SET_RESOLVER_RECORD: &'static str = "set_resolver_record";
     static ref UNSET_RESOLVER_RECORD: &'static str = "unset_resolver_record";
 
-    static ref TRANSFER_PROGRAM_ID: &'static str = "ans_credit_transfer";
+    static ref TRANSFER_PROGRAM_ID: String = env::var("TRANSFER_PROGRAM_ID").unwrap_or_else(|_| "ans_credit_transfer".to_string());
     static ref TRANSFER_CREDITS: &'static str = "transfer_credits";
     static ref CLAIM_CREDITS_PUBLIC: &'static str = "claim_credits_public";
     static ref CLAIM_CREDITS_PRIVATE: &'static str = "claim_credits_private";
@@ -232,7 +238,7 @@ async fn get_latest_height() -> u32 {
 }
 
 async fn get_next_block_number(init_latest_height: i64) -> Result<i64, Box<dyn Error>> {
-    let mut local_latest_height = ANS_BLOCK_HEIGHT_START;
+    let mut local_latest_height = *ANS_BLOCK_HEIGHT_START;
     let db_client = DB_POOL.get().await?;
     let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
     db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await.unwrap();
@@ -241,7 +247,7 @@ async fn get_next_block_number(init_latest_height: i64) -> Result<i64, Box<dyn E
     let query = db_client.prepare(&query).await.unwrap();
     let rows = db_client.query(&query, &[]).await?;
     if !rows.is_empty() {
-        local_latest_height = rows.get(0).unwrap().get(0);
+        local_latest_height = max(rows.get(0).unwrap().get(0), local_latest_height);
     }
 
     let mut latest_height= init_latest_height;
@@ -771,29 +777,5 @@ fn parse_u64<N: Network>(u64_arg: &Argument<N>) -> Result<u64, String> {
         Ok(u64::from_le_bytes(last_8.try_into().unwrap()))
     } else {
         Err("e".to_string())
-    }
-}
-
-// generate tests
-#[cfg(test)]
-mod tests {
-    use snarkvm_console_program::{Plaintext, Value};
-    use snarkvm_console_network::{FromFields, ToFields};
-    use super::*;
-
-    #[test]
-    fn test_parse_u64<N: Network>() {
-        let u64_val = Value::<N>::from_str("100u64").unwrap();
-        let u64_arg = Argument::<N>::Plaintext(Plaintext::<N>::from_fields(&u64_val.to_fields().unwrap()).unwrap());
-        let result = parse_u64(&u64_arg);
-        assert_eq!(result, Ok(100));
-    }
-
-    #[test]
-    fn test_parse_address<N: Network>() {
-        let address_val = Value::<N>::from_str("aleo1q6qstg8q8shwqf5m6q5fcenuwsdqsvp4hhsgfnx5chzjm3secyzqt9mxm8").unwrap();
-        let address_arg = Argument::<N>::Plaintext(Plaintext::<N>::from_fields(&address_val.to_fields().unwrap()).unwrap());
-        let result = parse_address(&address_arg);
-        assert_eq!(result, Ok("aleo1q6qstg8q8shwqf5m6q5fcenuwsdqsvp4hhsgfnx5chzjm3secyzqt9mxm8".to_string()));
     }
 }

@@ -20,7 +20,7 @@ pub struct NameStruct {
 }
 
 fn get_base_uri() -> String {
-    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.provable.com/v1/testnet".to_string());
     let program = env::var("PROGRAM").unwrap_or_else(|_| "aleo_name_service_registry.aleo".to_string());
     let base_uri = format!("{}/program/{}", url_host, program);
     base_uri
@@ -248,7 +248,7 @@ pub async fn check_name_hash(name: &String) -> Result<String, String> {
 // }
 #[instrument]
 pub async fn get_last_height() -> Result<u32, String> {
-    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.provable.com/v1/testnet".to_string());
     let url = format!("{}/block/height/latest", url_host);
     let resp = call_api(url).await?;
     let height: u32 = resp.parse().unwrap_or_else(|_| 0);
@@ -257,7 +257,7 @@ pub async fn get_last_height() -> Result<u32, String> {
 
 
 pub async fn get_cdn_last_height() -> Result<u32, String> {
-    let url_host = env::var("ALEO_HEALTHCHECK_HOST").unwrap_or_else(|_| "https://healthcheck.aleo.org".to_string());
+    let url_host = env::var("ALEO_HEALTHCHECK_HOST").unwrap_or_else(|_| "https://healthcheck.provable.com".to_string());
     let url = format!("{}/fastsync/latestHeight", url_host);
     let resp = call_api(url).await?;
     let height: u32 = resp.parse().unwrap_or_else(|_| 0);
@@ -267,7 +267,7 @@ pub async fn get_cdn_last_height() -> Result<u32, String> {
 
 #[instrument]
 pub async fn get_blocks(start: u32, end: u32) -> Result<Value, String> {
-    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.provable.com/v1/testnet".to_string());
     let url = format!("{}/blocks?start={}&end={}", url_host, start, end);
     return call_json_api(url).await;
 }
@@ -275,7 +275,7 @@ pub async fn get_blocks(start: u32, end: u32) -> Result<Value, String> {
 
 #[instrument]
 pub async fn get_block(height: u32) -> Result<Value, String> {
-    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.aleo.org/v1/testnet".to_string());
+    let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.provable.com/v1/testnet".to_string());
     let url = format!("{}/block/{}", url_host, height);
     return call_json_api(url).await;
 }
