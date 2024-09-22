@@ -34,8 +34,9 @@ lazy_static! {
     static ref REGISTER_PRIVATE: &'static str = "register_private";
     static ref REGISTER_PUBLIC: &'static str = "register_public";
     static ref TRANSFER_PUBLIC: &'static str = "transfer_public";
-    static ref CONVERT_PRIVATE_TO_PUBLIC: &'static str = "transfer_private_to_public";
-    static ref CONVERT_PUBLIC_TO_PRIVATE: &'static str = "transfer_public_to_private";
+    static ref TRANSFER_PRIVATE: &'static str = "transfer_private";
+    static ref TRANSFER_PRIVATE_TO_PUBLIC: &'static str = "transfer_private_to_public";
+    static ref TRANSFER_PUBLIC_TO_PRIVATE: &'static str = "transfer_public_to_private";
     static ref TRANSFER_FROM_PUBLIC: &'static str = "transfer_from_public";
     static ref SET_PRIMARY_NAME: &'static str = "set_primary_name";
     static ref UNSET_PRIMARY_NAME: &'static str = "unset_primary_name";
@@ -45,6 +46,8 @@ lazy_static! {
     static ref RECORD_PROGRAM_ID: String = env::var("RECORD_PROGRAM_ID").unwrap_or_else(|_| "ans_resolver".to_string());
     static ref SET_RESOLVER_RECORD: &'static str = "set_resolver_record";
     static ref UNSET_RESOLVER_RECORD: &'static str = "unset_resolver_record";
+    static ref SET_RESOLVER_RECORD_PUBLIC: &'static str = "set_resolver_record_public";
+    static ref UNSET_RESOLVER_RECORD_PUBLIC: &'static str = "unset_resolver_record_public";
 
     static ref TRANSFER_PROGRAM_ID: String = env::var("TRANSFER_PROGRAM_ID").unwrap_or_else(|_| "ans_credit_transfer".to_string());
     static ref TRANSFER_CREDITS: &'static str = "transfer_credits";
@@ -285,10 +288,11 @@ async fn index_data<N: Network>(block: &Block<N>) {
                         name if name == *REGISTER_TLD => register_tld(&db_trans, &block, &transaction, transition).await,
                         name if name == *REGISTER_PRIVATE => register(&db_trans, &block, &transaction, transition).await,
                         name if name == *REGISTER_PUBLIC => register(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CONVERT_PRIVATE_TO_PUBLIC => convert_private_to_public(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CONVERT_PUBLIC_TO_PRIVATE => convert_public_to_private(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_PRIVATE_TO_PUBLIC => transfer_private_to_public(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_PUBLIC_TO_PRIVATE => transfer_public_to_private(&db_trans, &block, &transaction, transition).await,
                         name if name == *TRANSFER_FROM_PUBLIC => transfer_from_public(&db_trans, &block, &transaction, transition).await,
                         name if name == *TRANSFER_PUBLIC => transfer_public(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_PRIVATE => transfer_private(&db_trans, &block, &transaction, transition).await,
                         name if name == *SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await,
                         name if name == *UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await,
                         name if name == *SET_RESOLVER => set_resolver(&db_trans, &block, &transaction, transition).await,
@@ -310,6 +314,8 @@ async fn index_data<N: Network>(block: &Block<N>) {
                     match transition.function_name().to_string() {
                         name if name == *SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await,
                         name if name == *UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == *SET_RESOLVER_RECORD_PUBLIC => set_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == *UNSET_RESOLVER_RECORD_PUBLIC => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
@@ -391,7 +397,7 @@ async fn register_tld<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, bl
 
 }
 
-async fn convert_private_to_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_private_to_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -413,7 +419,7 @@ async fn convert_private_to_public<N: Network>(db_trans: &tokio_postgres::Transa
     };
 }
 
-async fn convert_public_to_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_public_to_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
     let outs = transition.outputs();
     let outs_last = outs.get(outs.len() - 1).unwrap();
     if let Some(may_future) = outs_last.future() {
@@ -426,12 +432,7 @@ async fn convert_public_to_private<N: Network>(db_trans: &tokio_postgres::Transa
 
         db_trans.execute("DELETE from ans_nft_owner WHERE name_hash=$1", &[&name_hash]).await.unwrap();
 
-        let version = 2;
-        db_trans.execute("INSERT INTO ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
-                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-        db_trans.execute("DELETE from ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+        version_update(&db_trans, &block, &transaction, &transition, &name_hash, &owner).await;
 
         info!("convert_public_to_private {} {}", name_hash, owner)
     } else {
@@ -457,12 +458,7 @@ async fn transfer_from_public<N: Network>(db_trans: &tokio_postgres::Transaction
                          &[&name_hash, &new_owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        let version = 2;
-        db_trans.execute("INSERT INTO ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
-                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-        db_trans.execute("DELETE from ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+        version_update(&db_trans, &block, &transaction, &transition, &name_hash, &owner).await;
 
         info!("transfer_from_public {} {} to {}", name_hash, owner, new_owner)
     } else {
@@ -495,16 +491,28 @@ async fn transfer_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>,
                          &[&name_hash, &receiver, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        let version = 2;
-        db_trans.execute("INSERT INTO ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
-                         &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-        db_trans.execute("DELETE from ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
+        version_update(&db_trans, &block, &transaction, &transition, &name_hash, &owner).await;
 
         info!(">> transfer_public {} {} caller {}", name_hash, owner, caller)
     } else {
         error!(">> transfer_public: Error in {} | {}", block.height(), transaction.id())
+    };
+}
+
+async fn transfer_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let name_hash_arg = args.get(0).unwrap();
+
+        let name_hash: String = parse_field(name_hash_arg).unwrap();
+
+        version_update(&db_trans, &block, &transaction, &transition, &name_hash, "").await;
+
+        info!("transfer_private {}", name_hash)
+    } else {
+        error!("transfer_private: Error in {} | {}", block.height(), transaction.id())
     };
 }
 
@@ -578,12 +586,10 @@ async fn set_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
         let name_hash_arg = args.get(0).unwrap();
-        let owner_arg = args.get(1).unwrap();
-        let category_arg = args.get(2).unwrap();
-        let content_arg = args.get(3).unwrap();
+        let category_arg = args.get(1).unwrap();
+        let content_arg = args.get(2).unwrap();
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let owner = parse_address(owner_arg).unwrap();
         let category: String = parse_str_u128(category_arg).unwrap();
         let content = parse_str_8u128(content_arg).unwrap();
 
@@ -600,7 +606,7 @@ async fn set_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<
                          &[&name_hash, &category, &version, &content, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
-        info!("set_resolver_record: {} {} {} {} {}", owner, name_hash, category, content, version)
+        info!("set_resolver_record: {} {} {} {}", name_hash, category, content, version)
     } else {
         error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id())
     };
@@ -613,11 +619,9 @@ async fn unset_resolver_record<N: Network>(db_trans: &tokio_postgres::Transactio
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
         let name_hash_arg = args.get(0).unwrap();
-        let owner_arg = args.get(1).unwrap();
-        let category_arg = args.get(2).unwrap();
+        let category_arg = args.get(1).unwrap();
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let owner = parse_address(owner_arg).unwrap();
         let category: String = parse_str_u128(category_arg).unwrap();
 
         let mut version = 1;
@@ -632,7 +636,7 @@ async fn unset_resolver_record<N: Network>(db_trans: &tokio_postgres::Transactio
                          &[&name_hash, &category, &version]
         ).await.unwrap();
 
-        info!("unset_resolver_record: {} {} {} {}", owner, name_hash, category, version)
+        info!("unset_resolver_record: {} {} {}", name_hash, category, version)
     } else {
         error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id())
     };
@@ -648,6 +652,7 @@ async fn burn<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Bl
         let name_hash: String = parse_field(name_hash_arg).unwrap();
 
         db_trans.execute("DELETE from ans_name WHERE name_hash=$1", &[&name_hash]).await.unwrap();
+        version_update(&db_trans, &block, &transaction, &transition, &name_hash, "").await;
 
         info!("burn: {} in {}|{}", name_hash, block.height(), transaction.id())
     } else {
@@ -696,6 +701,15 @@ async fn claim_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, b
     } else {
         error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
     };
+}
+
+async fn version_update<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>, name_hash: &str, owner: &str) {
+    let version = 2;
+    db_trans.execute("INSERT INTO ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET version = ans_name_version.version + 1, block_height=$3, transaction_id=$4, transition_id=$5",
+                     &[&name_hash, &version, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+    ).await.unwrap();
+    db_trans.execute("DELETE from ans_primary_name WHERE name_hash=$1 AND address=$2", &[&name_hash, &owner]).await.unwrap();
 }
 
 fn parse_str_name_struct<N: Network>(name_arg: &Argument<N>) -> Result<String, String> {
