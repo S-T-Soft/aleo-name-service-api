@@ -1,11 +1,17 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::env;
 use actix_web::web::Data;
-use deadpool_postgres::{Manager, Object, Pool};
+use deadpool_postgres::{Object, Pool};
+use lazy_static::lazy_static;
 use tokio_postgres::Error;
 use tracing::{debug, info};
 use crate::models::*;
 use crate::utils;
+
+lazy_static!{
+    static ref PROGRAM_ID: String = env::var("PROGRAM_ID").unwrap_or_else(|_| "aleo_name_service_registry".to_string());
+    static ref RECORD_PROGRAM_ID: String = env::var("RECORD_PROGRAM_ID").unwrap_or_else(|_| "ans_resolver".to_string());
+}
 
 pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWithPrimary, Error> {
     let client = get_db_client(pool).await;
@@ -218,12 +224,16 @@ pub(crate) async fn get_statistic_data(pool: &Pool) -> Result<AnsStatistic, Erro
 
     let st= AnsStatistic {
         healthy: true,
+        registry: PROGRAM_ID.to_string(),
+        resolver: RECORD_PROGRAM_ID.to_string(),
         block_height,
         cal_time: cur_time,
         total_names,
         total_names_24h,
         total_pri_names: total_names - total_nft,
-        total_nft_owners: total_owner
+        total_nft_owners: total_owner,
+        server: env!("CARGO_PKG_NAME").to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
     };
     Ok(st)
 }

@@ -1,6 +1,5 @@
 use reqwest;
 use std::env;
-use std::error::Error;
 use std::time::Duration;
 use regex::Regex;
 use serde::Deserialize;
@@ -8,7 +7,7 @@ use serde::Deserialize;
 use crate::utils;
 
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value};
 // use actix_web::web::Data;
 use tracing::{instrument, warn};
 

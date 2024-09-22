@@ -3,7 +3,6 @@ use std::cmp::max;
 use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use tokio::time::sleep;
 use snarkvm_console_network::Network;
@@ -55,7 +54,7 @@ lazy_static! {
     static ref CLAIM_CREDITS_PRIVATE: &'static str = "claim_credits_private";
 
     static ref DB_POOL: deadpool_postgres::Pool = {
-        let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
+        let db_url = env::var("DATABASE_URL").unwrap();
         let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
         let mgr_config =deadpool_postgres::ManagerConfig {
             recycling_method: deadpool_postgres::RecyclingMethod::Fast

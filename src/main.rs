@@ -9,9 +9,8 @@ use std::net::IpAddr;
 use actix_web_prom::PrometheusMetricsBuilder;
 use base64::encode;
 use reqwest::StatusCode;
-use actix_governor::{Governor, GovernorConfigBuilder};
 use dotenv::dotenv;
-use snarkvm_console_network::{MainnetV0, Network, TestnetV0};
+use snarkvm_console_network::{MainnetV0, Network, TestnetV0, CanaryV0};
 use tracing::{info, warn};
 use tracing_appender::{non_blocking, rolling};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -19,10 +18,8 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::{EnvFilter, fmt};
 
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 use models::*;
-use crate::auth::RealIpKeyExtractor;
 
 mod utils;
 mod client;
@@ -328,7 +325,7 @@ async fn main() -> std::io::Result<()> {
     dotenv().ok();
     let _guards = init_tracing();
     // db config
-    let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
+    let db_url = env::var("DATABASE_URL").unwrap();
     let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
     let mgr_config =deadpool_postgres::ManagerConfig {
         recycling_method: deadpool_postgres::RecyclingMethod::Fast
@@ -344,12 +341,6 @@ async fn main() -> std::io::Result<()> {
 
 
     let trusted_reverse_proxy_ip = env::var("REVERSE_IP").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let governor_conf = GovernorConfigBuilder::default()
-        .per_second(2)
-        .burst_size(64)
-        .key_extractor(RealIpKeyExtractor)
-        .finish()
-        .unwrap();
 
     let run_indexer = env::var("RUN_INDEXER").unwrap_or_else(|_| "true".to_string());
 
@@ -362,6 +353,9 @@ async fn main() -> std::io::Result<()> {
                 }
                 TestnetV0::ID => {
                     indexer::sync_data::<TestnetV0>().await;
+                }
+                CanaryV0::ID => {
+                    indexer::sync_data::<CanaryV0>().await;
                 }
                 _ => {}
             }
@@ -381,7 +375,6 @@ async fn main() -> std::io::Result<()> {
             )
             .wrap(prometheus.clone())
             .wrap(auth::Authentication)
-            .wrap(Governor::new(&governor_conf))
             .app_data(web::Data::new(IpAddr::from_str(&trusted_reverse_proxy_ip).unwrap()))
             .app_data(web::Data::new(db_pool.clone()))
             .service(name_to_hash)

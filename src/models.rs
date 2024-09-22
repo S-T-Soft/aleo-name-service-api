@@ -64,12 +64,16 @@ pub struct AnsTokenAttr {
 #[derive(Serialize, Deserialize)]
 pub struct AnsStatistic {
     pub healthy: bool,
+    pub registry: String,
+    pub resolver: String,
     pub block_height: i64,
     pub cal_time: u64,
     pub total_names_24h: i64,
     pub total_names: i64,
     pub total_pri_names: i64,
-    pub total_nft_owners: i64
+    pub total_nft_owners: i64,
+    pub server: String,
+    pub version: String,
 }
 
 // db

@@ -8,7 +8,7 @@ use crate::{client, db};
 
 pub async fn run() {
 
-    let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://casaos:casaos@10.0.0.17:5432/aleoe".to_string());
+    let db_url = env::var("DATABASE_URL").unwrap();
     let db_config= tokio_postgres::Config::from_str(&db_url).unwrap();
     let mgr_config =deadpool_postgres::ManagerConfig {
         recycling_method: deadpool_postgres::RecyclingMethod::Fast

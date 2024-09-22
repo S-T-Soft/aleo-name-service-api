@@ -2,9 +2,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::cmp::min;
 use std::str::FromStr;
 use lazy_static::lazy_static;
-use snarkvm_console_program::{Field, Scalar, ToBits, Value};
+use snarkvm_console_program::{Field, ToBits, Value};
 use snarkvm_console_network::prelude::Zero;
-use snarkvm_console_network::{MainnetV0, Network, TestnetV0, ToFields};
+use snarkvm_console_network::{MainnetV0, Network, ToFields};
 use tracing::info;
 
 type N = MainnetV0;
