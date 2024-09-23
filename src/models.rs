@@ -10,12 +10,14 @@ pub struct AddressName {
 #[derive(Serialize)]
 pub struct NameHash {
     pub name_hash: String,
+    pub name_field: String,
     pub name: String,
 }
 
 #[derive(Serialize)]
 pub struct NameHashBalance {
     pub name_hash: String,
+    pub name_field: String,
     pub name: String,
     pub balance: i64,
 }
@@ -87,6 +89,7 @@ pub struct NFT {
 #[derive(Serialize)]
 pub struct NFTWithPrimary {
     pub name_hash: String,
+    pub name_field: String,
     pub address: String,
     pub name: String,
     pub is_primary_name: bool,

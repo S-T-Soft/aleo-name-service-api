@@ -38,7 +38,15 @@ struct GetResolverParams {
 #[get("/name_to_hash/{name}")]
 async fn name_to_hash(name: web::Path<String>) -> impl Responder {
     let name = name.into_inner();
-    let name_hash = utils::parse_name_hash(&name);
+    let name_field = utils::parse_name_field(&name);
+    let name_field = match name_field {
+        Ok(value) => value.to_string(),
+        Err(e) => {
+            warn!("Error parsing name: {} .. {}", &name, e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({ "error": format!("Error parsing name: {}", e) }));
+        }
+    };
+    let name_hash = utils::parse_name_hash_from_name_field(&name_field);
     let name_hash = match name_hash {
         Ok(value) => value.to_string(),
         Err(e) => {
@@ -47,7 +55,7 @@ async fn name_to_hash(name: web::Path<String>) -> impl Responder {
         }
     };
 
-    HttpResponse::Ok().json(NameHash { name_hash, name })
+    HttpResponse::Ok().json(NameHash { name_hash, name_field, name })
 }
 
 #[get("/hash_to_name/{name_hash}")]
@@ -58,6 +66,7 @@ async fn hash_to_name(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: we
     match nft {
         Ok(data) => HttpResponse::Ok().json(NameHashBalance {
             name_hash: data.name_hash,
+            name_field: data.name_field,
             name: data.name,
             balance: data.balance,
         }),
@@ -67,12 +76,13 @@ async fn hash_to_name(db_pool: web::Data<deadpool_postgres::Pool>, name_hash: we
 
 #[get("/field_to_name/{name_field}")]
 async fn field_to_name(db_pool: web::Data<deadpool_postgres::Pool>, name_field: web::Path<String>) -> impl Responder {
-    let name_hash = utils::parse_name_hash_from_name_field(&name_field.into_inner()).unwrap().to_string();
-    let nft = db::get_name_by_namehash(&db_pool, &name_hash).await;
+    let name_field = name_field.into_inner();
+    let nft = db::get_name_by_name_field(&db_pool, &name_field).await;
 
     match nft {
         Ok(data) => HttpResponse::Ok().json(NameHashBalance {
             name_hash: data.name_hash,
+            name_field: data.name_field,
             name: data.name,
             balance: data.balance,
         }),

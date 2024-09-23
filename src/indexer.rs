@@ -353,9 +353,11 @@ async fn register<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block:
             full_name = name.clone() + &".".to_string() + parent_full_name;
         }
 
-        db_trans.execute("INSERT INTO ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8, $9) ON CONFLICT (name_hash) DO NOTHING",
-                         &[&name_hash, &transfer_key, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        let name_field = utils::parse_name_field(&full_name).unwrap().to_string();
+
+        db_trans.execute("INSERT INTO ans_name (name_hash, name_field, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &name_field, &transfer_key, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         info!("register: {} {} {} {} {}", name, parent, name_hash, full_name, resolver)
@@ -380,9 +382,11 @@ async fn register_tld<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, bl
         let name = parse_str_name_struct(name_arg).unwrap();
         let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
 
-        db_trans.execute("INSERT INTO ans_name (name_hash, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5, $6, $7, $8, $9) ON CONFLICT (name_hash) DO NOTHING",
-                         &[&name_hash, &transfer_key, &name, &"0field".to_string(), &"".to_string(), &name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        let name_field = utils::parse_name_field(&name).unwrap().to_string();
+
+        db_trans.execute("INSERT INTO ans_name (name_hash, name_field, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (name_hash) DO NOTHING",
+                         &[&name_hash, &name_field, &transfer_key, &name, &"0field".to_string(), &"".to_string(), &name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
         db_trans.execute("INSERT INTO ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",

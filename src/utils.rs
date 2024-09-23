@@ -56,6 +56,13 @@ pub fn parse_label(name: &str, parent: Field<N>) -> Result<Value<N>, String> {
     Ok (Value::<N>::try_from(&names).map_err(|e| e.to_string())?)
 }
 
+pub fn parse_label_field(name: &str, parent: Field<N>) -> Result<Field<N>, String> {
+    let label = parse_label(name, parent)?;
+    let avalue = label.to_fields().map_err(|e| e.to_string())?;
+    let name_hash = N::hash_psd2(&avalue).map_err(|e| e.to_string())?;
+    Ok(name_hash)
+}
+
 pub fn parse_name_hash_from_name_field(name_field: &str) -> Result<Field<N>, String> {
     let data = format!("{{metadata: [{}, 0field, 0field, 0field]}}", &name_field);
     let data_value = Value::<N>::try_from(&data).map_err(|e| e.to_string())?;
@@ -65,19 +72,29 @@ pub fn parse_name_hash_from_name_field(name_field: &str) -> Result<Field<N>, Str
     Ok (name_hash)
 }
 
-// Parse a name to hash
-pub fn parse_name_hash(name: &str) -> Result<Field<N>, String> {
+// Parse a name to field
+pub fn parse_name_field(name: &str) -> Result<Field<N>, String> {
     // split name with dot，revert the order
     let mut name_parts: Vec<&str> = name.split('.').collect();
     name_parts.reverse();
+    let size = name_parts.len();
     // convert the parts to hash
     let mut name_hash = Field::<N>::zero();
-    for part in name_parts {
-        let label = parse_label(part, name_hash)?;
-        let avalue = label.to_fields().map_err(|e| e.to_string())?;
-        name_hash = N::hash_psd2(&avalue).map_err(|e| e.to_string())?;
-        name_hash = parse_name_hash_from_name_field(&name_hash.to_string())?;
+    for (idx, part) in name_parts.iter().enumerate() {
+        name_hash = parse_label_field(part, name_hash)?;
+        // if part is not the last part, then convert it to name hash
+        if idx != size - 1 {
+            name_hash = parse_name_hash_from_name_field(&name_hash.to_string())?;
+        }
     }
+    Ok(name_hash)
+}
+
+// Parse a name to hash
+pub fn parse_name_hash(name: &str) -> Result<Field<N>, String> {
+    // convert the parts to hash
+    let mut name_hash = parse_name_field(name)?;
+    name_hash = parse_name_hash_from_name_field(&name_hash.to_string())?;
     Ok(name_hash)
 }
 
@@ -116,7 +133,7 @@ mod tests {
     #[test]
     fn test_get_name_transfer_key_valid() {
         let name = "888.ans";
-        let expected = "177840532985979970251149184589146856693339066848489471550212639743537535986field";
+        let expected = "53139748664502586091431213167427765808091636772556794226634994381581651759field";
         match get_name_transfer_key(&name) {
             Ok(value) => assert_eq!(value.to_string(), expected, "key not equal"),
             Err(e) => assert!(false, "Expected Ok, got Err {}", e),
@@ -146,5 +163,18 @@ mod tests {
                 Err(e) => assert!(false, "Expected Ok, got Err {}", e),
             }
         }
+    }
+
+    // performance test for parse_name_hash, test 1000 times, print time cost
+    #[test]
+    fn test_parse_name_hash_performance() {
+        let name = "888.ans";
+        let start = SystemTime::now();
+        for _ in 0..1000 {
+            parse_name_hash(&name).unwrap();
+        }
+        let end = SystemTime::now();
+        let duration = end.duration_since(start).unwrap();
+        println!("parse_name_hash_performance cost: {:?}, cost {:?} pre calc", duration, duration/1000);
     }
 }

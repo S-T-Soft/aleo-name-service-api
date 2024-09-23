@@ -34,6 +34,7 @@ create table ans_name
 (
     id         bigserial,
     name_hash  text          not null,
+    name_field  text         not null,
     transfer_key text,
     parent     text,
     name       text          not null,
@@ -46,6 +47,8 @@ create table ans_name
         unique (name_hash)
 );
 
+create index ans_name_field_index
+    on ans_name (name_field);
 
 create table ans_primary_name
 (

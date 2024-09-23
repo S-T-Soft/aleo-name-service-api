@@ -13,35 +13,29 @@ lazy_static!{
     static ref RECORD_PROGRAM_ID: String = env::var("RECORD_PROGRAM_ID").unwrap_or_else(|_| "ans_resolver".to_string());
 }
 
-pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWithPrimary, Error> {
+async fn get_name_by_query(pool: &Pool, query: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<NFTWithPrimary, Error> {
     let client = get_db_client(pool).await;
 
-    let query = "select an.id, an.name_hash, an.full_name, an.resolver, ap.id, dc.amount
-            FROM ans_name AS an
-            LEFT JOIN ans_primary_name as ap ON an.name_hash = ap.name_hash
-            LEFT JOIN domain_credits as dc ON an.transfer_key = dc.transfer_key
-            WHERE an.name_hash = $1 limit 1";
-
-    debug!("get_name_by_namehash query db: {} params {}", &query, name_hash);
     let query = client.prepare(&query).await.unwrap();
-    let row = client.query_one(&query, &[&name_hash]).await?;
+    let row = client.query_one(&query, &params).await?;
 
-    let primary_id: Option<i64> = row.get(4);
+    let primary_id: Option<i64> = row.get(5);
     let is_primary_name = match primary_id {
         Some(pid) => pid > 0,
         None => false,
     };
 
-    let resolver: Option<String> = row.get(3);
+    let resolver: Option<String> = row.get(4);
     let resolver = resolver.unwrap_or_else(|| "".to_string());
 
-    let balance: Option<i64> = row.get(5);
+    let balance: Option<i64> = row.get(6);
     let balance = balance.unwrap_or_else(|| 0i64);
-    
+
     let nft = NFTWithPrimary {
         name_hash: row.get(1),
+        name_field: row.get(2),
         address: "".to_string(),
-        name: row.get(2),
+        name: row.get(3),
         is_primary_name,
         resolver,
         balance,
@@ -50,10 +44,34 @@ pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWit
     Ok(nft)
 }
 
+pub async fn get_name_by_namehash(pool: &Pool, name_hash: &str) -> Result<NFTWithPrimary, Error> {
+    let query = "select an.id, an.name_hash, an.name_field, an.full_name, an.resolver, ap.id, dc.amount
+            FROM ans_name AS an
+            LEFT JOIN ans_primary_name as ap ON an.name_hash = ap.name_hash
+            LEFT JOIN domain_credits as dc ON an.transfer_key = dc.transfer_key
+            WHERE an.name_hash = $1 limit 1";
+
+    debug!("get_name_by_namehash query db: {} params {}", &query, name_hash);
+    let nft = get_name_by_query(&pool, &query, &[&name_hash]).await?;
+    Ok( nft )
+}
+
+pub async fn get_name_by_name_field(pool: &Pool, name_field: &str) -> Result<NFTWithPrimary, Error> {
+    let query = "select an.id, an.name_hash, an.name_field, an.full_name, an.resolver, ap.id, dc.amount
+            FROM ans_name AS an
+            LEFT JOIN ans_primary_name as ap ON an.name_hash = ap.name_hash
+            LEFT JOIN domain_credits as dc ON an.transfer_key = dc.transfer_key
+            WHERE an.name_field = $1 limit 1";
+
+    debug!("get_name_by_name_field query db: {} params {}", &query, name_field);
+    let nft = get_name_by_query(&pool, &query, &[&name_field]).await?;
+    Ok( nft )
+}
+
 pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWithPrimary>, Error> {
     let client = get_db_client(pool).await;
 
-    let query = "select ao.id, ao.name_hash, ao.address, an.full_name, ap.id, an.resolver, dc.amount
+    let query = "select ao.id, ao.name_hash, an.name_field, ao.address, an.full_name, ap.id, an.resolver, dc.amount
             FROM ans_nft_owner as ao
             JOIN ans_name as an ON ao.name_hash = an.name_hash
             LEFT JOIN ans_primary_name as ap ON ao.name_hash = ap.name_hash
@@ -67,22 +85,23 @@ pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWith
     let mut nft_list = Vec::new();
 
     for row in _rows {
-        let primary_id: Option<i64> = row.get(4);
+        let primary_id: Option<i64> = row.get(5);
         let is_primary = match primary_id {
             Some(pid) => pid > 0,
             None => false,
         };
 
-        let resolver: Option<String> = row.get(5);
+        let resolver: Option<String> = row.get(6);
         let resolver = resolver.unwrap_or_else(|| "".to_string());
 
-        let balance: Option<i64> = row.get(6);
+        let balance: Option<i64> = row.get(7);
         let balance = balance.unwrap_or_else(|| 0i64);
         
         let nft = NFTWithPrimary {
             name_hash: row.get(1),
-            address: row.get(2),
-            name: row.get(3),
+            name_field: row.get(2),
+            address: row.get(3),
+            name: row.get(4),
             is_primary_name: is_primary,
             resolver,
             balance,
