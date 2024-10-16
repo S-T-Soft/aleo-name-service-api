@@ -92,12 +92,13 @@ pub async fn sync_data<N: Network>() {
             if (latest_height - block_number) > 10 {
                 match client::get_blocks(block_number as u32, block_number as u32 + 10).await {
                     Ok(response) => {
-                        if let Ok(blocks) = serde_json::from_value::<Vec<Block<N>>>(response) {
-                            for data in blocks {
-                                index_data(&data).await;
-                            }
-                        } else {
-                            warn!("err parse response!");
+                        match serde_json::from_value::<Vec<Block<N>>>(response) {
+                            Ok(blocks) => {
+                                for data in blocks {
+                                    index_data(&data).await;
+                                }
+                            },
+                            Err(e) => eprintln!("Error parse response: {}", e)
                         }
                     },
                     Err(e) => eprintln!("Error fetching data: {}", e),
@@ -106,10 +107,9 @@ pub async fn sync_data<N: Network>() {
             } else {
                 match client::get_block(block_number as u32).await {
                     Ok(response) => {
-                        if let Ok(data) = serde_json::from_value::<Block<N>>(response) {
-                            index_data(&data).await;
-                        } else {
-                            warn!("err parse response!");
+                        match serde_json::from_value::<Block<N>>(response) {
+                            Ok(data) => index_data(&data).await,
+                            Err(e) => eprintln!("Error fetching data: {}", e),
                         }
                     },
                     Err(e) => eprintln!("Error fetching data: {}", e),
