@@ -4,6 +4,7 @@ use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
 use lazy_static::lazy_static;
+use serde_json::Value;
 use tokio::time::sleep;
 use snarkvm_console_network::Network;
 use snarkvm_ledger_block::{Block, Transaction};
@@ -72,6 +73,19 @@ impl fmt::Display for IndexError {
 
 impl Error for IndexError {}
 
+fn preprocess_cumulative_weight(value: &mut Value) {
+    if let Some(metadata) = value.get_mut("header").and_then(|v| v.get_mut("metadata")) {
+        if let Some(cumulative_weight) = metadata.get_mut("cumulative_weight") {
+            if let Some(weight_number) = cumulative_weight.as_u64() {
+                *cumulative_weight = Value::String(weight_number.to_string());
+            } else if cumulative_weight.is_number() {
+                let num_str = cumulative_weight.to_string();
+                *cumulative_weight = Value::String(num_str);
+            }
+        }
+    }
+}
+
 pub async fn sync_data<N: Network>() {
     info!("Start data indexer...");
     let mut latest_height = get_latest_height().await as i64;
@@ -92,7 +106,15 @@ pub async fn sync_data<N: Network>() {
             if (latest_height - block_number) > 10 {
                 match client::get_blocks(block_number as u32, block_number as u32 + 10).await {
                     Ok(response) => {
-                        match serde_json::from_value::<Vec<Block<N>>>(response) {
+                        let mut value_response: Vec<Value> = serde_json::from_value(response).unwrap_or_else(|e| {
+                            eprintln!("Error converting response to serde_json::Value: {}", e);
+                            vec![]
+                        });
+
+                        for block in value_response.iter_mut() {
+                            preprocess_cumulative_weight(block);
+                        }
+                        match serde_json::from_value::<Vec<Block<N>>>(Value::Array(value_response)) {
                             Ok(blocks) => {
                                 for data in blocks {
                                     index_data(&data).await;
@@ -106,7 +128,8 @@ pub async fn sync_data<N: Network>() {
 
             } else {
                 match client::get_block(block_number as u32).await {
-                    Ok(response) => {
+                    Ok(mut response) => {
+                        preprocess_cumulative_weight(&mut response);
                         match serde_json::from_value::<Block<N>>(response) {
                             Ok(data) => index_data(&data).await,
                             Err(e) => eprintln!("Error fetching data: {}", e),
