@@ -10,10 +10,10 @@ actix-web = "4.9.0"
 actix-cors = "0.6.5"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
-snarkvm-console-program = "1.0.0"
-snarkvm-console-network = "1.0.0"
-snarkvm-ledger-block = "1.0.0"
-snarkos-node-cdn = "3.0.0"
+snarkvm-console-program = { git = "https://github.com/ghostant-1017/snarkVM", branch = "fix/mainnet" }
+snarkvm-console-network = { git = "https://github.com/ghostant-1017/snarkVM", branch = "fix/mainnet" }
+snarkvm-ledger-block = { git = "https://github.com/ghostant-1017/snarkVM", branch = "fix/mainnet" }
+snarkos-node-cdn = { git = "https://github.com/AleoNet/snarkOS", tag = "mainnet-v1.0.0" }
 reqwest = { version = "0.11", features = ["json"] }
 lazy_static = "1.5.0"
 regex = "1.10.6"

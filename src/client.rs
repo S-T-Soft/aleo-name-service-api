@@ -265,16 +265,16 @@ pub async fn get_cdn_last_height() -> Result<u32, String> {
 
 
 #[instrument]
-pub async fn get_blocks(start: u32, end: u32) -> Result<Value, String> {
+pub async fn get_blocks(start: u32, end: u32) -> Result<String, String> {
     let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.provable.com/v1/testnet".to_string());
     let url = format!("{}/blocks?start={}&end={}", url_host, start, end);
-    return call_json_api(url).await;
+    call_api(url).await
 }
 
 
 #[instrument]
-pub async fn get_block(height: u32) -> Result<Value, String> {
+pub async fn get_block(height: u32) -> Result<String, String> {
     let url_host = env::var("URL_HOST").unwrap_or_else(|_| "https://api.explorer.provable.com/v1/testnet".to_string());
     let url = format!("{}/block/{}", url_host, height);
-    return call_json_api(url).await;
+    call_api(url).await
 }
