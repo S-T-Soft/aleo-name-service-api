@@ -27,7 +27,7 @@ fn get_base_uri() -> String {
 
 pub(crate) async fn call_api(url: String) -> Result<String, String> {
     let client = Client::builder()
-        .timeout(Duration::from_secs(5)) // 设置超时时间为 5 秒
+        .timeout(Duration::from_millis(6000)) // 设置超时时间为 6 秒
         .build()
         .unwrap();
     // Make the request
@@ -43,13 +43,16 @@ pub(crate) async fn call_api(url: String) -> Result<String, String> {
     };
 
     // Parse the response text
-    let resp = resp.text().await.unwrap();
+    let resp_text = resp.text().await.map_err(|err| {
+        warn!("Error parsing response text: {}", err);
+        err.to_string()
+    })?;
 
-    if resp.trim() == "null" {
+    if resp_text.trim() == "null" {
         return Err("Error getting content".to_string());
     }
 
-    Ok( resp )
+    Ok( resp_text )
 }
 
 

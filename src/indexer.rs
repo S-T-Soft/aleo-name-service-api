@@ -109,10 +109,13 @@ pub async fn sync_data<N: Network>() {
                                     index_data(&data).await;
                                 }
                             },
-                            Err(e) => eprintln!("Error parse response: {}", e)
+                            Err(e) => error!("Error parse batch response: {}", e)
                         }
                     },
-                    Err(e) => eprintln!("Error fetching data: {}", e),
+                    Err(e) => {
+                        sleep(Duration::from_millis(500)).await;
+                        error!("Error fetching batch data: {}", e)
+                    },
                 }
 
             } else {
@@ -121,16 +124,19 @@ pub async fn sync_data<N: Network>() {
                         let response = preprocess_json(&response);
                         match serde_json::from_str::<Block<N>>(&response) {
                             Ok(data) => index_data(&data).await,
-                            Err(e) => eprintln!("Error fetching data: {}", e),
+                            Err(e) => error!("Error fetching data: {}", e),
                         }
                     },
-                    Err(e) => eprintln!("Error fetching data: {}", e),
+                    Err(e) => {
+                        sleep(Duration::from_millis(500)).await;
+                        error!("Error fetching data: {}", e)
+                    },
                 }
             }
 
             sleep(Duration::from_micros(50)).await;
         } else {
-            sleep(Duration::from_secs(5)).await;
+            sleep(Duration::from_secs(3)).await;
         }
 
         if block_number > latest_height {
