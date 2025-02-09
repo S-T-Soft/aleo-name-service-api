@@ -5,15 +5,14 @@ use std::str::FromStr;
 use std::time::Duration;
 use lazy_static::lazy_static;
 use regex::Regex;
-use serde_json::Value;
 use tokio::time::sleep;
-use snarkvm_console_network::{MainnetV0, Network};
+use snarkvm_console_network::Network;
 use snarkvm_ledger_block::{Block, Transaction};
 use snarkvm_console_network::prelude::ToBytes;
 use snarkvm_console_program::{Field, Address, Argument, FromBytes};
 use snarkvm_ledger_block::{Transition};
 use tokio_postgres::NoTls;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use crate::{client, utils};
 
 static MAX_BLOCK_RANGE: u32 = 50;
@@ -52,8 +51,13 @@ lazy_static! {
 
     static ref TRANSFER_PROGRAM_ID: String = env::var("TRANSFER_PROGRAM_ID").unwrap_or_else(|_| "ans_credit_transfer".to_string());
     static ref TRANSFER_CREDITS: &'static str = "transfer_credits";
+    static ref TRANSFER_CREDITS_PUBLIC: &'static str = "transfer_credits_public";
     static ref CLAIM_CREDITS_PUBLIC: &'static str = "claim_credits_public";
     static ref CLAIM_CREDITS_PRIVATE: &'static str = "claim_credits_private";
+    static ref TRANSFER_TOKEN: &'static str = "transfer_token";
+    static ref TRANSFER_TOKEN_PUBLIC: &'static str = "transfer_token_public";
+    static ref CLAIM_TOKEN_PUBLIC: &'static str = "claim_token_public";
+    static ref CLAIM_TOKEN_PRIVATE: &'static str = "claim_token_private";
 
     static ref DB_POOL: deadpool_postgres::Pool = {
         let db_url = env::var("DATABASE_URL").unwrap();
@@ -321,8 +325,13 @@ async fn index_data<N: Network>(block: &Block<N>) {
                     info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
                     match transition.function_name().to_string() {
                         name if name == *TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_CREDITS_PUBLIC => transfer_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_TOKEN => transfer_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_TOKEN_PUBLIC => transfer_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_TOKEN_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_TOKEN_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
@@ -550,7 +559,7 @@ async fn set_primary_name<N: Network>(db_trans: &tokio_postgres::Transaction<'_>
         let owner: String = parse_address(owner_arg).unwrap();
 
         db_trans.execute("INSERT INTO ans_primary_name (name_hash, address, block_height, transaction_id, transition_id) \
-                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (address) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (address) DO UPDATE SET name_hash = $1, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
