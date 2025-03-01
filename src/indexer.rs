@@ -52,12 +52,16 @@ lazy_static! {
     static ref TRANSFER_PROGRAM_ID: String = env::var("TRANSFER_PROGRAM_ID").unwrap_or_else(|_| "ans_credit_transfer".to_string());
     static ref TRANSFER_CREDITS: &'static str = "transfer_credits";
     static ref TRANSFER_CREDITS_PUBLIC: &'static str = "transfer_credits_public";
+    static ref TRANSFER_CREDITS_AS_SIGNER: &'static str = "transfer_credits_as_signer";
     static ref CLAIM_CREDITS_PUBLIC: &'static str = "claim_credits_public";
     static ref CLAIM_CREDITS_PRIVATE: &'static str = "claim_credits_private";
+    static ref CLAIM_CREDITS_AS_SIGNER: &'static str = "claim_credits_as_signer";
     static ref TRANSFER_TOKEN: &'static str = "transfer_token";
     static ref TRANSFER_TOKEN_PUBLIC: &'static str = "transfer_token_public";
+    static ref TRANSFER_TOKEN_AS_SIGNER: &'static str = "transfer_token_as_signer";
     static ref CLAIM_TOKEN_PUBLIC: &'static str = "claim_token_public";
     static ref CLAIM_TOKEN_PRIVATE: &'static str = "claim_token_private";
+    static ref CLAIM_TOKEN_AS_SIGNER: &'static str = "claim_token_as_signer";
 
     static ref DB_POOL: deadpool_postgres::Pool = {
         let db_url = env::var("DATABASE_URL").unwrap();
@@ -326,12 +330,16 @@ async fn index_data<N: Network>(block: &Block<N>) {
                     match transition.function_name().to_string() {
                         name if name == *TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *TRANSFER_CREDITS_PUBLIC => transfer_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_TOKEN => transfer_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_TOKEN_PUBLIC => transfer_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_CREDITS_AS_SIGNER => transfer_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_TOKEN => transfer_token(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_TOKEN_PUBLIC => transfer_token(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_TOKEN_AS_SIGNER => transfer_token(&db_trans, &block, &transaction, transition).await,
                         name if name == *CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_TOKEN_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_TOKEN_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_CREDITS_AS_SIGNER => claim_credits(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_TOKEN_PUBLIC => claim_token(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_TOKEN_PRIVATE => claim_token(&db_trans, &block, &transaction, transition).await,
+                        name if name == *CLAIM_TOKEN_AS_SIGNER => claim_token(&db_trans, &block, &transaction, transition).await,
                         _ => {}
                     }
                 }
@@ -598,7 +606,7 @@ async fn set_resolver<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, bl
 
         let name_hash: String = parse_field(name_hash_arg).unwrap();
         let owner: String = parse_address(owner_arg).unwrap();
-        let resolver = parse_str_u128(resolver_arg).unwrap();
+        let resolver = parse_str_field(resolver_arg, true).unwrap();
 
         db_trans.execute("UPDATE ans_name set resolver=$1  WHERE name_hash=$2 ",
                          &[&resolver, &name_hash]
@@ -733,6 +741,49 @@ async fn claim_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, b
     };
 }
 
+async fn transfer_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
+        let amount_arg = args.get(args.len() - 1).unwrap();
+
+        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
+        let amount: u128 = parse_u128(amount_arg).unwrap();
+
+        db_trans.execute("INSERT INTO domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
+                                    VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
+                         &[&transfer_key, &amount.to_string(), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+    } else {
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
+    };
+}
+
+async fn claim_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+    let outs = transition.outputs();
+    let outs_last = outs.get(outs.len() - 1).unwrap();
+    if let Some(may_future) = outs_last.future() {
+        let args = may_future.arguments();
+        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
+        let amount_arg = args.get(args.len() - 1).unwrap();
+
+        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
+        let amount: u128 = parse_u128(amount_arg).unwrap();
+
+        db_trans.execute("UPDATE domain_credits SET amount = domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
+                         &[&transfer_key, &amount.to_string(), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+        ).await.unwrap();
+
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+    } else {
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
+    };
+}
+
 async fn version_update<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>, name_hash: &str, owner: &str) {
     let version = 2;
     db_trans.execute("INSERT INTO ans_name_version (name_hash, version, block_height, transaction_id, transition_id) \
@@ -791,6 +842,17 @@ fn parse_str_u128<N: Network>(name_arg: &Argument<N>) -> Result<String, String> 
     Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
 }
 
+fn parse_str_field<N: Network>(name_arg: &Argument<N>, reverse: bool) -> Result<String, String> {
+    let name_bytes = Argument::to_bytes_le(name_arg).unwrap();
+    let mut name: [u8; 32] = [0; 32];
+
+    name[0..32].copy_from_slice(&name_bytes[4..36]);
+    if reverse {
+        name.reverse();
+    }
+    Ok(std::str::from_utf8(&name).unwrap().trim_matches('\0').to_string())
+}
+
 fn parse_field<N: Network>(field_arg: &Argument<N>) -> Result<String, String> {
     let field_arg_bytes = Argument::to_bytes_le(field_arg).unwrap();
 
@@ -824,13 +886,37 @@ fn parse_u64<N: Network>(u64_arg: &Argument<N>) -> Result<u64, String> {
     }
 }
 
+fn parse_u128<N: Network>(u128_arg: &Argument<N>) -> Result<u128, String> {
+    let u128_arg_bytes = Argument::to_bytes_le(u128_arg).unwrap();
+
+    if u128_arg_bytes.len() >= 16 {
+        let last_16: &[u8] = &u128_arg_bytes[u128_arg_bytes.len() - 16..];
+        Ok(u128::from_le_bytes(last_16.try_into().unwrap()))
+    } else {
+        Err("e".to_string())
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
     use snarkvm_console_network::MainnetV0;
+    use snarkvm_console_program::Future;
     use snarkvm_ledger_block::Block;
-    use crate::indexer::preprocess_json;
+    use crate::indexer::{parse_str_field, parse_u128, preprocess_json};
+
+    #[test]
+    fn test_parse_plaintext() {
+        let fu = Future::<MainnetV0>::from_str(
+            "{ program_id: test.aleo, function_name: test, arguments: [ 418262508645field, 123u128 ] }",
+        ).unwrap();
+        let f = fu.arguments().get(0).unwrap();
+        let s = parse_str_field(f, true).unwrap();
+        assert!(s.eq("abcde"));
+        let f = fu.arguments().get(1).unwrap();
+        let u = parse_u128(f).unwrap();
+        assert!(u == 123u128)
+    }
 
     #[test]
     fn test_parse() {

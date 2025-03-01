@@ -93,7 +93,7 @@ create table domain_credits
     id         bigserial,
     transfer_key  text      not null,
     amount    bigint default 0 not null,
-    block_height   bigint,
+    block_height   numeric,
     transaction_id text,
     transition_id text,
     constraint transfer_key_pk
