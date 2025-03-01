@@ -68,6 +68,7 @@ pub struct AnsStatistic {
     pub healthy: bool,
     pub registry: String,
     pub resolver: String,
+    pub transfer: String,
     pub block_height: i64,
     pub cal_time: u64,
     pub total_names_24h: i64,

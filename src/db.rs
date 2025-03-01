@@ -11,6 +11,7 @@ use crate::utils;
 lazy_static!{
     static ref PROGRAM_ID: String = env::var("PROGRAM_ID").unwrap_or_else(|_| "aleo_name_service_registry".to_string());
     static ref RECORD_PROGRAM_ID: String = env::var("RECORD_PROGRAM_ID").unwrap_or_else(|_| "ans_resolver".to_string());
+    static ref TRANSFER_PROGRAM_ID: String = env::var("TRANSFER_PROGRAM_ID").unwrap_or_else(|_| "ans_credit_transfer".to_string());
 }
 
 async fn get_name_by_query(pool: &Pool, query: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<NFTWithPrimary, Error> {
@@ -245,6 +246,7 @@ pub(crate) async fn get_statistic_data(pool: &Pool) -> Result<AnsStatistic, Erro
         healthy: true,
         registry: PROGRAM_ID.to_string(),
         resolver: RECORD_PROGRAM_ID.to_string(),
+        transfer: TRANSFER_PROGRAM_ID.to_string(),
         block_height,
         cal_time: cur_time,
         total_names,
