@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize, Serializer};
 
 // resp
 #[derive(Serialize)]
@@ -19,7 +20,7 @@ pub struct NameHashBalance {
     pub name_hash: String,
     pub name_field: String,
     pub name: String,
-    pub balance: i64,
+    pub balance: Decimal,
 }
 
 #[derive(Serialize)]
@@ -95,6 +96,6 @@ pub struct NFTWithPrimary {
     pub name: String,
     pub is_primary_name: bool,
     pub resolver: String,
-    pub balance: i64,
+    pub balance: Decimal,
 }
 

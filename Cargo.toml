@@ -18,6 +18,7 @@ lazy_static = "1.5.0"
 regex = "1.10.6"
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = "0.7.11"
+rust_decimal = {  version = "1.26", features = ["db-tokio-postgres"] }
 deadpool-postgres = "0.11.0"
 actix-web-prom = "0.7.0"
 futures-util = "0.3.28"
@@ -30,3 +31,4 @@ tracing-appender = "0.2"
 tracing-error = "0.2"
 color-eyre = "0.6"
 dotenv = "0.15.0"
+bigdecimal = "0.4"

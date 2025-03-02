@@ -1,6 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::env;
+use std::str::FromStr;
 use actix_web::web::Data;
+use rust_decimal::Decimal;
 use deadpool_postgres::{Object, Pool};
 use lazy_static::lazy_static;
 use tokio_postgres::Error;
@@ -29,8 +31,8 @@ async fn get_name_by_query(pool: &Pool, query: &str, params: &[&(dyn tokio_postg
     let resolver: Option<String> = row.get(4);
     let resolver = resolver.unwrap_or_else(|| "".to_string());
 
-    let balance: Option<i64> = row.get(6);
-    let balance = balance.unwrap_or_else(|| 0i64);
+    let balance: Option<Decimal> = row.get(6);
+    let balance = balance.unwrap_or_else(|| Decimal::from(0));
 
     let nft = NFTWithPrimary {
         name_hash: row.get(1),
@@ -95,8 +97,8 @@ pub async fn get_names_by_addr(pool: &Pool, address: &str) -> Result<Vec<NFTWith
         let resolver: Option<String> = row.get(6);
         let resolver = resolver.unwrap_or_else(|| "".to_string());
 
-        let balance: Option<i64> = row.get(7);
-        let balance = balance.unwrap_or_else(|| 0i64);
+        let balance: Option<Decimal> = row.get(7);
+        let balance = balance.unwrap_or_else(|| Decimal::from(0));
         
         let nft = NFTWithPrimary {
             name_hash: row.get(1),

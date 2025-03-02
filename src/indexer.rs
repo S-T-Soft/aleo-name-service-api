@@ -5,6 +5,8 @@ use std::str::FromStr;
 use std::time::Duration;
 use lazy_static::lazy_static;
 use regex::Regex;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
 use tokio::time::sleep;
 use snarkvm_console_network::Network;
 use snarkvm_ledger_block::{Block, Transaction};
@@ -52,13 +54,11 @@ lazy_static! {
     static ref TRANSFER_PROGRAM_ID: String = env::var("TRANSFER_PROGRAM_ID").unwrap_or_else(|_| "ans_credit_transfer".to_string());
     static ref TRANSFER_CREDITS: &'static str = "transfer_credits";
     static ref TRANSFER_CREDITS_PUBLIC: &'static str = "transfer_credits_public";
-    static ref TRANSFER_CREDITS_AS_SIGNER: &'static str = "transfer_credits_as_signer";
     static ref CLAIM_CREDITS_PUBLIC: &'static str = "claim_credits_public";
     static ref CLAIM_CREDITS_PRIVATE: &'static str = "claim_credits_private";
     static ref CLAIM_CREDITS_AS_SIGNER: &'static str = "claim_credits_as_signer";
     static ref TRANSFER_TOKEN: &'static str = "transfer_token";
     static ref TRANSFER_TOKEN_PUBLIC: &'static str = "transfer_token_public";
-    static ref TRANSFER_TOKEN_AS_SIGNER: &'static str = "transfer_token_as_signer";
     static ref CLAIM_TOKEN_PUBLIC: &'static str = "claim_token_public";
     static ref CLAIM_TOKEN_PRIVATE: &'static str = "claim_token_private";
     static ref CLAIM_TOKEN_AS_SIGNER: &'static str = "claim_token_as_signer";
@@ -330,10 +330,8 @@ async fn index_data<N: Network>(block: &Block<N>) {
                     match transition.function_name().to_string() {
                         name if name == *TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *TRANSFER_CREDITS_PUBLIC => transfer_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_CREDITS_AS_SIGNER => transfer_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *TRANSFER_TOKEN => transfer_token(&db_trans, &block, &transaction, transition).await,
                         name if name == *TRANSFER_TOKEN_PUBLIC => transfer_token(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_TOKEN_AS_SIGNER => transfer_token(&db_trans, &block, &transaction, transition).await,
                         name if name == *CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
                         name if name == *CLAIM_CREDITS_AS_SIGNER => claim_credits(&db_trans, &block, &transaction, transition).await,
@@ -711,7 +709,7 @@ async fn transfer_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>
 
         db_trans.execute("INSERT INTO domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
-                         &[&transfer_key, &(amount as i64), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+                         &[&transfer_key, &Decimal::from_u64(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
@@ -732,7 +730,7 @@ async fn claim_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, b
         let amount: u64 = parse_u64(amount_arg).unwrap();
 
         db_trans.execute("UPDATE domain_credits SET amount = domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
-                         &[&transfer_key, &(amount as i64), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+                         &[&transfer_key, &Decimal::from_u64(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
@@ -754,7 +752,7 @@ async fn transfer_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, 
 
         db_trans.execute("INSERT INTO domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
-                         &[&transfer_key, &amount.to_string(), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+                         &[&transfer_key, &Decimal::from_u128(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
@@ -775,7 +773,7 @@ async fn claim_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, blo
         let amount: u128 = parse_u128(amount_arg).unwrap();
 
         db_trans.execute("UPDATE domain_credits SET amount = domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
-                         &[&transfer_key, &amount.to_string(), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
+                         &[&transfer_key, &Decimal::from_u128(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
         ).await.unwrap();
 
         info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
