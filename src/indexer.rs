@@ -113,8 +113,8 @@ pub async fn sync_data<N: Network>() {
         });
 
         if block_number > 0 {
-            let load_blocks = min(10, latest_height - block_number) as u32;
-            match client::get_blocks(block_number as u32, block_number as u32 + load_blocks).await {
+            let to_block = min(latest_height, block_number + 10) as u32;
+            match client::get_blocks(block_number as u32, to_block).await {
                 Ok(response) => {
                     let response = preprocess_json(&response);
                     match serde_json::from_str::<Vec<Block<N>>>(&response) {
@@ -265,7 +265,7 @@ async fn get_next_block_number(init_latest_height: i64) -> Result<(i64, i64), Bo
     }
 
     let mut latest_height= init_latest_height;
-    if local_latest_height >= init_latest_height {
+    if local_latest_height >= latest_height || latest_height - local_latest_height < 11 {
         latest_height = get_latest_height().await as i64;
         if latest_height > init_latest_height {
             set_kv_value(&DB_POOL, "api_height", &latest_height.to_string()).await;
