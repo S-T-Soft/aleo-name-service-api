@@ -114,6 +114,7 @@ pub async fn sync_data<N: Network>() {
 
         if block_number > 0 {
             let to_block = min(latest_height, block_number + 10) as u32;
+            info!("Syncing data from block {} to {}", block_number, to_block);
             match client::get_blocks(block_number as u32, to_block).await {
                 Ok(response) => {
                     let response = preprocess_json(&response);
