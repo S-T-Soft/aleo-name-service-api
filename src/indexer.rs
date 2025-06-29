@@ -15,8 +15,8 @@ use snarkvm_console_program::{Field, Address, Argument, FromBytes};
 use snarkvm_ledger_block::{Transition};
 use tokio_postgres::NoTls;
 use tracing::{error, info};
-use crate::{client, utils};
-use crate::db::get_kv_value;
+use crate::{client, db, utils};
+use crate::db::{get_kv_value, set_kv_value};
 
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
@@ -107,9 +107,9 @@ pub async fn sync_data<N: Network>() {
             Err(_) => 0i64
         };
 
-        let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
+        let (block_number, latest_height) = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
             eprintln!("Error fetching next block number: {}", e);
-            0
+            (0, latest_height)
         });
 
         if block_number > 0 {
@@ -135,10 +135,6 @@ pub async fn sync_data<N: Network>() {
             sleep(Duration::from_micros(50)).await;
         } else {
             sleep(Duration::from_secs(1)).await;
-        }
-
-        if block_number > latest_height {
-            latest_height = get_latest_height().await as i64;
         }
     }
 }
@@ -249,13 +245,13 @@ async fn get_latest_height() -> u32 {
             Ok(height) => return height,
             Err(err) => {
                 error!("get_latest_height error: {}", err);
-                sleep(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(2)).await;
             }
         }
     }
 }
 
-async fn get_next_block_number(init_latest_height: i64) -> Result<i64, Box<dyn Error>> {
+async fn get_next_block_number(init_latest_height: i64) -> Result<(i64, i64), Box<dyn Error>> {
     let mut local_latest_height = *ANS_BLOCK_HEIGHT_START;
     let db_client = DB_POOL.get().await?;
     let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
@@ -271,6 +267,9 @@ async fn get_next_block_number(init_latest_height: i64) -> Result<i64, Box<dyn E
     let mut latest_height= init_latest_height;
     if local_latest_height >= init_latest_height {
         latest_height = get_latest_height().await as i64;
+        if latest_height > init_latest_height {
+            set_kv_value(&DB_POOL, "api_height", &latest_height.to_string()).await;
+        }
     }
 
     info!("Latest height: {}", latest_height);
@@ -280,7 +279,7 @@ async fn get_next_block_number(init_latest_height: i64) -> Result<i64, Box<dyn E
     } else {
         0
     };
-    Ok(height)
+    Ok((height, latest_height))
 }
 
 async fn index_data<N: Network>(block: &Block<N>) {
