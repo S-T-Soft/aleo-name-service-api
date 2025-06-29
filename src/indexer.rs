@@ -115,22 +115,38 @@ pub async fn sync_data<N: Network>() {
         if block_number > 0 {
             let to_block = min(latest_height, block_number + 10) as u32;
             info!("Syncing data from block {} to {}", block_number, to_block);
-            match client::get_blocks(block_number as u32, to_block).await {
-                Ok(response) => {
-                    let response = preprocess_json(&response);
-                    match serde_json::from_str::<Vec<Block<N>>>(&response) {
-                        Ok(blocks) => {
-                            for data in blocks {
-                                index_data(&data).await;
-                            }
-                        },
-                        Err(e) => error!("Error parse batch response: {}", e)
-                    }
-                },
-                Err(e) => {
-                    sleep(Duration::from_millis(500)).await;
-                    error!("Error fetching batch data: {}", e)
-                },
+            if (block_number as u32) < to_block {
+                match client::get_blocks(block_number as u32, to_block).await {
+                    Ok(response) => {
+                        let response = preprocess_json(&response);
+                        match serde_json::from_str::<Vec<Block<N>>>(&response) {
+                            Ok(blocks) => {
+                                for data in blocks {
+                                    index_data(&data).await;
+                                }
+                            },
+                            Err(e) => error!("Error parse batch response: {}", e)
+                        }
+                    },
+                    Err(e) => {
+                        sleep(Duration::from_millis(500)).await;
+                        error!("Error fetching batch data: {}", e)
+                    },
+                }
+            } else {
+                match client::get_block(block_number as u32).await {
+                    Ok(response) => {
+                        let response = preprocess_json(&response);
+                        match serde_json::from_str::<Block<N>>(&response) {
+                            Ok(data) => index_data(&data).await,
+                            Err(e) => error!("Error fetching data: {}", e),
+                        }
+                    },
+                    Err(e) => {
+                        sleep(Duration::from_millis(500)).await;
+                        error!("Error fetching data: {}", e)
+                    },
+                }
             }
 
             sleep(Duration::from_micros(50)).await;
