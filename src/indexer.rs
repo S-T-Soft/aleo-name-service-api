@@ -1,5 +1,5 @@
 use std::{env, fmt};
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
@@ -16,6 +16,7 @@ use snarkvm_ledger_block::{Transition};
 use tokio_postgres::NoTls;
 use tracing::{error, info};
 use crate::{client, utils};
+use crate::db::get_kv_value;
 
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
@@ -101,50 +102,39 @@ pub async fn sync_data<N: Network>() {
     fix_transfer_key().await;
 
     loop {
+        latest_height = match get_kv_value(&DB_POOL, "api_height").await {
+            Ok(v) => max(v.parse().unwrap(), latest_height),
+            Err(_) => 0i64
+        };
+
         let block_number = get_next_block_number(latest_height).await.unwrap_or_else(|e| {
             eprintln!("Error fetching next block number: {}", e);
             0
         });
 
         if block_number > 0 {
-            if (latest_height - block_number) > 10 {
-                match client::get_blocks(block_number as u32, block_number as u32 + 10).await {
-                    Ok(response) => {
-                        let response = preprocess_json(&response);
-                        match serde_json::from_str::<Vec<Block<N>>>(&response) {
-                            Ok(blocks) => {
-                                for data in blocks {
-                                    index_data(&data).await;
-                                }
-                            },
-                            Err(e) => error!("Error parse batch response: {}", e)
-                        }
-                    },
-                    Err(e) => {
-                        sleep(Duration::from_millis(500)).await;
-                        error!("Error fetching batch data: {}", e)
-                    },
-                }
-
-            } else {
-                match client::get_block(block_number as u32).await {
-                    Ok(response) => {
-                        let response = preprocess_json(&response);
-                        match serde_json::from_str::<Block<N>>(&response) {
-                            Ok(data) => index_data(&data).await,
-                            Err(e) => error!("Error fetching data: {}", e),
-                        }
-                    },
-                    Err(e) => {
-                        sleep(Duration::from_millis(500)).await;
-                        error!("Error fetching data: {}", e)
-                    },
-                }
+            let load_blocks = min(10, latest_height - block_number) as u32;
+            match client::get_blocks(block_number as u32, block_number as u32 + load_blocks).await {
+                Ok(response) => {
+                    let response = preprocess_json(&response);
+                    match serde_json::from_str::<Vec<Block<N>>>(&response) {
+                        Ok(blocks) => {
+                            for data in blocks {
+                                index_data(&data).await;
+                            }
+                        },
+                        Err(e) => error!("Error parse batch response: {}", e)
+                    }
+                },
+                Err(e) => {
+                    sleep(Duration::from_millis(500)).await;
+                    error!("Error fetching batch data: {}", e)
+                },
             }
 
             sleep(Duration::from_micros(50)).await;
         } else {
-            sleep(Duration::from_secs(3)).await;
+            sleep(Duration::from_secs(1)).await;
         }
 
         if block_number > latest_height {
