@@ -108,6 +108,9 @@ pub async fn sync_data<N: Network>() {
 
     fix_transfer_key().await;
 
+    let mut batch_retry_delay_ms: u64 = 500;
+    let mut single_retry_delay_ms: u64 = 500;
+
     loop {
         latest_height = match get_kv_value(&DB_POOL, "api_height").await {
             Ok(v) => max(v.parse().unwrap(), latest_height),
@@ -125,6 +128,7 @@ pub async fn sync_data<N: Network>() {
             if (block_number as u32) < to_block {
                 match client::get_blocks(block_number as u32, to_block).await {
                     Ok(response) => {
+                        batch_retry_delay_ms = 500;
                         let response = preprocess_json(&response);
                         match serde_json::from_str::<Vec<serde_json::Value>>(&response) {
                             Ok(blocks_json) => {
@@ -138,19 +142,26 @@ pub async fn sync_data<N: Network>() {
                         }
                     },
                     Err(e) => {
-                        sleep(Duration::from_millis(500)).await;
-                        error!("Error fetching batch data: {}", e)
+                        let delay = batch_retry_delay_ms;
+                        batch_retry_delay_ms = std::cmp::min(batch_retry_delay_ms * 2, 16000);
+
+                        error!("Error fetching batch data: {}. Retrying in {}ms", e, delay);
+                        sleep(Duration::from_millis(delay)).await;
                     },
                 }
             } else {
                 match client::get_block(block_number as u32).await {
                     Ok(response) => {
+                        single_retry_delay_ms = 500;
                         let response = preprocess_json(&response);
                         index_data::<N>(&response, block_number as u32).await;
                     },
                     Err(e) => {
-                        sleep(Duration::from_millis(500)).await;
-                        error!("Error fetching data: {}", e)
+                        let delay = single_retry_delay_ms;
+                        single_retry_delay_ms = std::cmp::min(single_retry_delay_ms * 2, 16000);
+
+                        error!("Error fetching data: {}. Retrying in {}ms", e, delay);
+                        sleep(Duration::from_millis(delay)).await;
                     },
                 }
             }
