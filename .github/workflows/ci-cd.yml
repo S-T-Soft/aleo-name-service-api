@@ -33,19 +33,6 @@ jobs:
           VERSION=$(grep '^version' Cargo.toml | head -1 | awk -F\" '{print $2}')
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create tag from Cargo.toml version
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta'
-        env:
-          VERSION: ${{ steps.cargo-version.outputs.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if ! git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
-            git config user.name "${{ github.actor }}"
-            git config user.email "${{ github.actor }}@users.noreply.github.com"
-            git tag "${VERSION}"
-            git push origin "${VERSION}"
-          fi
-
       - name: Install cosign
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20
