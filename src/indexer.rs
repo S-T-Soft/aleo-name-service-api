@@ -135,7 +135,11 @@ pub async fn sync_data<N: Network>() {
                                 for (i, block_value) in blocks_json.iter().enumerate() {
                                     let block_json = block_value.to_string();
                                     let height = block_number as u32 + i as u32;
-                                    index_data::<N>(&block_json, height).await;
+                                    if let Err(e) = index_data::<N>(&block_json, height).await {
+                                        error!("Error indexing block {}: {}. Retrying in {}ms", height, e, batch_retry_delay_ms);
+                                        sleep(Duration::from_millis(batch_retry_delay_ms)).await;
+                                        break;
+                                    }
                                 }
                             },
                             Err(e) => error!(
@@ -148,7 +152,6 @@ pub async fn sync_data<N: Network>() {
                     Err(e) => {
                         let delay = batch_retry_delay_ms;
                         batch_retry_delay_ms = std::cmp::min(batch_retry_delay_ms * 2, 16000);
-
                         error!("Error fetching batch data: {}. Retrying in {}ms", e, delay);
                         sleep(Duration::from_millis(delay)).await;
                     },
@@ -158,12 +161,14 @@ pub async fn sync_data<N: Network>() {
                     Ok(response) => {
                         single_retry_delay_ms = 500;
                         let response = preprocess_json(&response);
-                        index_data::<N>(&response, block_number as u32).await;
+                        if let Err(e) = index_data::<N>(&response, block_number as u32).await {
+                            error!("Error indexing block {}: {}. Retrying in {}ms", block_number, e, single_retry_delay_ms);
+                            sleep(Duration::from_millis(single_retry_delay_ms)).await;
+                        }
                     },
                     Err(e) => {
                         let delay = single_retry_delay_ms;
                         single_retry_delay_ms = std::cmp::min(single_retry_delay_ms * 2, 16000);
-
                         error!("Error fetching data: {}. Retrying in {}ms", e, delay);
                         sleep(Duration::from_millis(delay)).await;
                     },
@@ -410,46 +415,45 @@ fn extract_block_basic_info(block_json: &str) -> Result<BlockBasicInfo, serde_js
     })
 }
 
-async fn index_data<N: Network>(block_json: &str, block_height: u32) {
+async fn index_data<N: Network>(block_json: &str, block_height: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Process block at height {}", block_height);
-    let mut db_client = DB_POOL.get().await.unwrap();
+    let mut db_client = DB_POOL.get().await?;
     let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
-    db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await.unwrap();
-    let db_trans = db_client.transaction().await.unwrap();
-
-    // First try to extract basic information from the block JSON
-    // Only parse the block JSON if it contains relevant programs, improving performance
+    db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await?;
+    let db_trans = db_client.transaction().await?;
     if let Ok(basic_info) = extract_block_basic_info(block_json) {
         db_trans.execute(
             "INSERT INTO block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
             &[&(basic_info.height as i64), &basic_info.hash, &basic_info.previous_hash, &basic_info.timestamp]
-        ).await.unwrap();
-
-        // Check if the block contains relevant programs
+        ).await?;
         if basic_info.has_relevant_programs {
-            // If it does, parse the full block JSON
             match serde_json::from_str::<Block<N>>(block_json) {
                 Ok(block) => {
-                    // Process the block data
-                    process_block_data(&db_trans, &block).await;
+                    if let Err(e) = process_block_data(&db_trans, &block).await {
+                        error!("Error processing block data: {}", e);
+                        db_trans.rollback().await?;
+                        return Err(e.into());
+                    }
                 },
-                Err(e) => error!(
-                    "Error parsing block: {}, json head: {}",
-                    e,
-                    &block_json.chars().take(20).collect::<String>()
-                ),
+                Err(e) => {
+                    error!("Error parsing block: {}, json head: {}", e, &block_json.chars().take(20).collect::<String>());
+                    db_trans.rollback().await?;
+                    return Err(e.into());
+                }
             }
         } else {
             info!("Block {} contains no relevant programs, skipping detailed parsing", block_height);
         }
     } else {
         error!("Error extracting basic info from block JSON");
+        db_trans.rollback().await?;
+        return Err("Error extracting basic info from block JSON".into());
     }
-
-    db_trans.commit().await.unwrap()
+    db_trans.commit().await?;
+    Ok(())
 }
 
-async fn process_block_data<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>) {
+async fn process_block_data<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Process detailed data for block {} on {}", block.height(), block.timestamp());
 
     for transaction in block.transactions().clone().into_iter() {
@@ -458,475 +462,467 @@ async fn process_block_data<N: Network>(db_trans: &tokio_postgres::Transaction<'
                 if transition.program_id().name().to_string() == *PROGRAM_ID {
                     info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
                     match transition.function_name().to_string() {
-                        name if name == *REGISTER => register(&db_trans, &block, &transaction, transition).await,
-                        name if name == *REGISTER_TLD => register_tld(&db_trans, &block, &transaction, transition).await,
-                        name if name == *REGISTER_PRIVATE => register(&db_trans, &block, &transaction, transition).await,
-                        name if name == *REGISTER_PUBLIC => register(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_PRIVATE_TO_PUBLIC => transfer_private_to_public(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_PUBLIC_TO_PRIVATE => transfer_public_to_private(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_FROM_PUBLIC => transfer_from_public(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_PUBLIC => transfer_public(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_PRIVATE => transfer_private(&db_trans, &block, &transaction, transition).await,
-                        name if name == *SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await,
-                        name if name == *UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await,
-                        name if name == *SET_RESOLVER => set_resolver(&db_trans, &block, &transaction, transition).await,
-                        name if name == *BURN => burn(&db_trans, &block, &transaction, transition).await,
+                        name if name == *REGISTER => register(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *REGISTER_TLD => register_tld(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *REGISTER_PRIVATE => register(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *REGISTER_PUBLIC => register(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_PRIVATE_TO_PUBLIC => transfer_private_to_public(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_PUBLIC_TO_PRIVATE => transfer_public_to_private(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_FROM_PUBLIC => transfer_from_public(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_PUBLIC => transfer_public(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_PRIVATE => transfer_private(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *SET_PRIMARY_NAME => set_primary_name(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *UNSET_PRIMARY_NAME => unset_primary_name(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *SET_RESOLVER => set_resolver(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *BURN => burn(&db_trans, &block, &transaction, transition).await?,
                         _ => {}
                     }
                 }
                 else if transition.program_id().name().to_string() == *TRANSFER_PROGRAM_ID {
                     info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
                     match transition.function_name().to_string() {
-                        name if name == *TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_CREDITS_PUBLIC => transfer_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_TOKEN => transfer_token(&db_trans, &block, &transaction, transition).await,
-                        name if name == *TRANSFER_TOKEN_PUBLIC => transfer_token(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_CREDITS_AS_SIGNER => claim_credits(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_TOKEN_PUBLIC => claim_token(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_TOKEN_PRIVATE => claim_token(&db_trans, &block, &transaction, transition).await,
-                        name if name == *CLAIM_TOKEN_AS_SIGNER => claim_token(&db_trans, &block, &transaction, transition).await,
+                        name if name == *TRANSFER_CREDITS => transfer_credits(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_CREDITS_PUBLIC => transfer_credits(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_TOKEN => transfer_token(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *TRANSFER_TOKEN_PUBLIC => transfer_token(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *CLAIM_CREDITS_PUBLIC => claim_credits(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *CLAIM_CREDITS_PRIVATE => claim_credits(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *CLAIM_CREDITS_AS_SIGNER => claim_credits(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *CLAIM_TOKEN_PUBLIC => claim_token(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *CLAIM_TOKEN_PRIVATE => claim_token(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *CLAIM_TOKEN_AS_SIGNER => claim_token(&db_trans, &block, &transaction, transition).await?,
                         _ => {}
                     }
                 }
                 else if transition.program_id().name().to_string() == *RECORD_PROGRAM_ID {
                     info!("process transition {}, function name: {}", transition.id(), transition.function_name().to_string());
                     match transition.function_name().to_string() {
-                        name if name == *SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await,
-                        name if name == *UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
-                        name if name == *SET_RESOLVER_RECORD_PUBLIC => set_resolver_record(&db_trans, &block, &transaction, transition).await,
-                        name if name == *UNSET_RESOLVER_RECORD_PUBLIC => unset_resolver_record(&db_trans, &block, &transaction, transition).await,
+                        name if name == *SET_RESOLVER_RECORD => set_resolver_record(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *UNSET_RESOLVER_RECORD => unset_resolver_record(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *SET_RESOLVER_RECORD_PUBLIC => set_resolver_record(&db_trans, &block, &transaction, transition).await?,
+                        name if name == *UNSET_RESOLVER_RECORD_PUBLIC => unset_resolver_record(&db_trans, &block, &transaction, transition).await?,
                         _ => {}
                     }
                 }
             }
         }
     }
+    Ok(())
 }
 
 /**
 process all register transition
  **/
-async fn register<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn register<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let name_hash_arg = args.get(0).unwrap();
-        let name_arg = args.get(1).unwrap();
-        let parent_arg = args.get(2).unwrap();
-        let resolver_arg = args.get(3).unwrap();
+        let name_hash_arg = args.get(0).ok_or("No name_hash_arg")?;
+        let name_arg = args.get(1).ok_or("No name_arg")?;
+        let parent_arg = args.get(2).ok_or("No parent_arg")?;
+        let resolver_arg = args.get(3).ok_or("No resolver_arg")?;
 
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let name = parse_str_4u128(name_arg).unwrap();
-        let parent: String = parse_field(parent_arg).unwrap();
-        let resolver = parse_str_u128(resolver_arg).unwrap();
-        let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
+        let name_hash: String = parse_field(name_hash_arg)?;
+        let name = parse_str_4u128(name_arg)?;
+        let parent: String = parse_field(parent_arg)?;
+        let resolver = parse_str_u128(resolver_arg)?;
+        let transfer_key = utils::get_name_hash_transfer_key(&name_hash)?.to_string();
         let mut full_name = name.clone();
 
         let query = "SELECT full_name FROM ans_name WHERE name_hash=$1 limit 1";
-        let query = db_trans.prepare(&query).await.unwrap();
-        let rows = db_trans.query(&query, &[&parent]).await.unwrap();
+        let query = db_trans.prepare(&query).await?;
+        let rows = db_trans.query(&query, &[&parent]).await?;
         if !rows.is_empty() {
-            let parent_full_name = rows.get(0).unwrap().get(0);
-            full_name = name.clone() + &".".to_string() + parent_full_name;
+            let parent_full_name: String = rows.get(0).unwrap().get(0);
+            full_name = name.clone() + &".".to_string() + &parent_full_name;
         }
 
-        let name_field = utils::parse_name_field(&full_name).unwrap().to_string();
+        let name_field = utils::parse_name_field(&full_name)?.to_string();
 
         db_trans.execute("INSERT INTO ans_name (name_hash, name_field, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &name_field, &transfer_key, &name, &parent, &resolver, &full_name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
+        ).await?;
 
-        info!("register: {} {} {} {} {}", name, parent, name_hash, full_name, resolver)
+        info!("register: {} {} {} {} {}", name, parent, name_hash, full_name, resolver);
+        Ok(())
     } else {
-        error!("register: Error in {} | {}", block.height(), transaction.id())
-    };
-
+        error!("register: Error in {} | {}", block.height(), transaction.id());
+        Err("register: missing future output".into())
+    }
 }
 
-async fn register_tld<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn register_tld<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
         // let hash_caller_arg = args.get(0).unwrap();
-        let registrar_arg = args.get(1).unwrap();
-        let name_hash_arg = args.get(2).unwrap();
-        let name_arg = args.get(3).unwrap();
+        let registrar_arg = args.get(1).ok_or("No registrar_arg")?;
+        let name_hash_arg = args.get(2).ok_or("No name_hash_arg")?;
+        let name_arg = args.get(3).ok_or("No name_arg")?;
 
-        let registrar: String = parse_address(registrar_arg).unwrap();
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let name = parse_str_name_struct(name_arg).unwrap();
-        let transfer_key = utils::get_name_hash_transfer_key(&name_hash).unwrap().to_string();
-
-        let name_field = utils::parse_name_field(&name).unwrap().to_string();
+        let registrar: String = parse_address(registrar_arg)?;
+        let name_hash: String = parse_field(name_hash_arg)?;
+        let name = parse_str_name_struct(name_arg)?;
+        let transfer_key = utils::get_name_hash_transfer_key(&name_hash)?.to_string();
+        let name_field = utils::parse_name_field(&name)?.to_string();
 
         db_trans.execute("INSERT INTO ans_name (name_hash, name_field, transfer_key, name, parent, resolver, full_name, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &name_field, &transfer_key, &name, &"0field".to_string(), &"".to_string(), &name, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
+        ).await?;
         db_trans.execute("INSERT INTO ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &registrar, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
+        ).await?;
 
-        info!("register_tld {} {} {}", name_hash, name, registrar)
+        info!("register_tld {} {} {}", name_hash, name, registrar);
+        Ok(())
     } else {
-        error!("register_tld: Error in {} | {}", block.height(), transaction.id())
-    };
-
+        error!("register_tld: Error in {} | {}", block.height(), transaction.id());
+        Err("register_tld: missing future output".into())
+    }
 }
 
-async fn transfer_private_to_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_private_to_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let owner_arg = args.get(0).unwrap();
-        let name_hash_arg = args.get(1).unwrap();
+        let owner_arg = args.get(0).ok_or("No owner_arg")?;
+        let name_hash_arg = args.get(1).ok_or("No name_hash_arg")?;
 
-        let owner: String = parse_address(owner_arg).unwrap();
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner: String = parse_address(owner_arg)?;
+        let name_hash: String = parse_field(name_hash_arg)?;
 
         db_trans.execute("INSERT INTO ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO NOTHING",
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
+        ).await?;
 
-        info!("convert_private_to_public {} {}", name_hash, owner)
+        info!("convert_private_to_public {} {}", name_hash, owner);
+        Ok(())
     } else {
-        error!("convert_private_to_public: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("convert_private_to_public: Error in {} | {}", block.height(), transaction.id());
+        Err("transfer_private_to_public: missing future output".into())
+    }
 }
 
-async fn transfer_public_to_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_public_to_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let owner_arg = args.get(0).unwrap();
-        let name_hash_arg = args.get(1).unwrap();
+        let owner_arg = args.get(0).ok_or("No owner_arg")?;
+        let name_hash_arg = args.get(1).ok_or("No name_hash_arg")?;
 
-        let owner: String = parse_address(owner_arg).unwrap();
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner: String = parse_address(owner_arg)?;
+        let name_hash: String = parse_field(name_hash_arg)?;
 
-        db_trans.execute("DELETE from ans_nft_owner WHERE name_hash=$1", &[&name_hash]).await.unwrap();
-
+        db_trans.execute("DELETE from ans_nft_owner WHERE name_hash=$1", &[&name_hash]).await?;
         version_update(&db_trans, &block, &transaction, &transition, &name_hash, &owner).await;
 
-        info!("convert_public_to_private {} {}", name_hash, owner)
+        info!("convert_public_to_private {} {}", name_hash, owner);
+        Ok(())
     } else {
-        error!("convert_public_to_private: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("convert_public_to_private: Error in {} | {}", block.height(), transaction.id());
+        Err("transfer_public_to_private: missing future output".into())
+    }
 }
 
-async fn transfer_from_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_from_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let owner_arg = args.get(1).unwrap();
-        let new_owner_arg = args.get(2).unwrap();
-        let name_hash_arg = args.get(3).unwrap();
+        let owner_arg = args.get(1).ok_or("No owner_arg")?;
+        let new_owner_arg = args.get(2).ok_or("No new_owner_arg")?;
+        let name_hash_arg = args.get(3).ok_or("No name_hash_arg")?;
 
-        let owner: String = parse_address(owner_arg).unwrap();
-        let new_owner: String = parse_address(new_owner_arg).unwrap();
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
+        let owner: String = parse_address(owner_arg)?;
+        let new_owner: String = parse_address(new_owner_arg)?;
+        let name_hash: String = parse_field(name_hash_arg)?;
 
         db_trans.execute("INSERT INTO ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &new_owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
+        ).await?;
 
         version_update(&db_trans, &block, &transaction, &transition, &name_hash, &owner).await;
 
-        info!("transfer_from_public {} {} to {}", name_hash, owner, new_owner)
+        info!("transfer_from_public {} {} to {}", name_hash, owner, new_owner);
+        Ok(())
     } else {
-        error!("transfer_from_public: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("transfer_from_public: Error in {} | {}", block.height(), transaction.id());
+        Err("transfer_from_public: missing future output".into())
+    }
 }
 
-async fn transfer_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_public<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let receiver_arg = args.get(0).unwrap();
-        let name_hash_arg = args.get(1).unwrap();
-        let caller_arg = args.get(2).unwrap();
+        let receiver_arg = args.get(0).ok_or("No receiver_arg")?;
+        let name_hash_arg = args.get(1).ok_or("No name_hash_arg")?;
+        let caller_arg = args.get(2).ok_or("No caller_arg")?;
 
-        let receiver: String = parse_address(receiver_arg).unwrap();
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let caller: String = parse_address(caller_arg).unwrap();
+        let receiver: String = parse_address(receiver_arg)?;
+        let name_hash: String = parse_field(name_hash_arg)?;
+        let caller: String = parse_address(caller_arg)?;
 
         let query = "SELECT address FROM ans_nft_owner WHERE name_hash=$1 limit 1";
-        let query = db_trans.prepare(&query).await.unwrap();
-        let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
-
+        let query = db_trans.prepare(&query).await?;
+        let rows = db_trans.query(&query, &[&name_hash]).await?;
         let owner:String = rows.get(0).unwrap().get(0);
-
 
         db_trans.execute("INSERT INTO ans_nft_owner (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (name_hash) DO UPDATE SET address = $2, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &receiver, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
+        ).await?;
 
         version_update(&db_trans, &block, &transaction, &transition, &name_hash, &owner).await;
 
-        info!(">> transfer_public {} {} caller {}", name_hash, owner, caller)
+        info!(">> transfer_public {} {} caller {}", name_hash, owner, caller);
+        Ok(())
     } else {
-        error!(">> transfer_public: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!(">> transfer_public: Error in {} | {}", block.height(), transaction.id());
+        Err("transfer_public: missing future output".into())
+    }
 }
 
-async fn transfer_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_private<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let name_hash_arg = args.get(0).unwrap();
-
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-
+        let name_hash_arg = args.get(0).ok_or("No name_hash_arg")?;
+        let name_hash: String = parse_field(name_hash_arg)?;
         version_update(&db_trans, &block, &transaction, &transition, &name_hash, "").await;
-
-        info!("transfer_private {}", name_hash)
+        info!("transfer_private {}", name_hash);
+        Ok(())
     } else {
-        error!("transfer_private: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("transfer_private: Error in {} | {}", block.height(), transaction.id());
+        Err("transfer_private: missing future output".into())
+    }
 }
 
-async fn set_primary_name<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn set_primary_name<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-
-        let name_hash_arg = args.get(0).unwrap();
-        let owner_arg = args.get(1).unwrap();
-
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let owner: String = parse_address(owner_arg).unwrap();
-
+        let name_hash_arg = args.get(0).ok_or("No name_hash_arg")?;
+        let owner_arg = args.get(1).ok_or("No owner_arg")?;
+        let name_hash: String = parse_field(name_hash_arg)?;
+        let owner: String = parse_address(owner_arg)?;
         db_trans.execute("INSERT INTO ans_primary_name (name_hash, address, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (address) DO UPDATE SET name_hash = $1, block_height=$3, transaction_id=$4, transition_id=$5 ",
                          &[&name_hash, &owner, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-
-        info!("set_primary_name {} {}", name_hash, owner)
+        ).await?;
+        info!("set_primary_name {} {}", name_hash, owner);
+        Ok(())
     } else {
-        error!("set_primary_name: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("set_primary_name: Error in {} | {}", block.height(), transaction.id());
+        Err("set_primary_name: missing future output".into())
+    }
 }
 
-async fn unset_primary_name<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn unset_primary_name<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let owner_arg = args.get(0).unwrap();
-
-        let owner: String = parse_address(owner_arg).unwrap();
-
-        db_trans.execute("DELETE from ans_primary_name WHERE address=$1", &[&owner]).await.unwrap();
-
-        info!("unset_primary_name {}", owner)
+        let owner_arg = args.get(0).ok_or("No owner_arg")?;
+        let owner: String = parse_address(owner_arg)?;
+        db_trans.execute("DELETE from ans_primary_name WHERE address=$1", &[&owner]).await?;
+        info!("unset_primary_name {}", owner);
+        Ok(())
     } else {
-        error!("unset_primary_name: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("unset_primary_name: Error in {} | {}", block.height(), transaction.id());
+        Err("unset_primary_name: missing future output".into())
+    }
 }
 
-async fn set_resolver<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn set_resolver<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-
-        let name_hash_arg = args.get(0).unwrap();
-        let owner_arg = args.get(1).unwrap();
-        let resolver_arg = args.get(2).unwrap();
-
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let owner: String = parse_address(owner_arg).unwrap();
-        let resolver = parse_str_field(resolver_arg, true).unwrap();
-
+        let name_hash_arg = args.get(0).ok_or("No name_hash_arg")?;
+        let owner_arg = args.get(1).ok_or("No owner_arg")?;
+        let resolver_arg = args.get(2).ok_or("No resolver_arg")?;
+        let name_hash: String = parse_field(name_hash_arg)?;
+        let owner: String = parse_address(owner_arg)?;
+        let resolver = parse_str_field(resolver_arg, true)?;
         db_trans.execute("UPDATE ans_name set resolver=$1  WHERE name_hash=$2 ",
                          &[&resolver, &name_hash]
-        ).await.unwrap();
+        ).await?;
 
-        info!("set_resolver {} {}", name_hash, owner)
+        info!("set_resolver {} {}", name_hash, owner);
+        Ok(())
     } else {
-        error!("set_resolver: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("set_resolver: Error in {} | {}", block.height(), transaction.id());
+        Err("set_resolver: missing future output".into())
+    }
 }
 
-async fn set_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn set_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let name_hash_arg = args.get(0).unwrap();
-        let category_arg = args.get(1).unwrap();
-        let content_arg = args.get(2).unwrap();
-
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let category: String = parse_str_u128(category_arg).unwrap();
-        let content = parse_str_8u128(content_arg).unwrap();
-
+        let name_hash_arg = args.get(0).ok_or("No name_hash_arg")?;
+        let category_arg = args.get(1).ok_or("No category_arg")?;
+        let content_arg = args.get(2).ok_or("No content_arg")?;
+        let name_hash: String = parse_field(name_hash_arg)?;
+        let category: String = parse_str_u128(category_arg)?;
+        let content = parse_str_8u128(content_arg)?;
         let mut version = 1;
         let query = "SELECT version FROM ans_name_version WHERE name_hash=$1 limit 1";
-        let query = db_trans.prepare(&query).await.unwrap();
-        let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
+        let query = db_trans.prepare(&query).await?;
+        let rows = db_trans.query(&query, &[&name_hash]).await?;
         if !rows.is_empty() {
             version = rows.get(0).unwrap().get(0);
         }
-
         db_trans.execute("INSERT INTO ans_resolver (name_hash, category, version, name, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5, $6, $7) ON CONFLICT (name_hash, category, version) DO UPDATE SET name=$4, block_height=$5, transaction_id=$6, transition_id=$7",
                          &[&name_hash, &category, &version, &content, &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-
-        info!("set_resolver_record: {} {} {} {}", name_hash, category, content, version)
+        ).await?;
+        info!("set_resolver_record: {} {} {} {}", name_hash, category, content, version);
+        Ok(())
     } else {
-        error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id())
-    };
-
+        error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id());
+        Err("set_resolver_record: missing future output".into())
+    }
 }
 
-async fn unset_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn unset_resolver_record<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let name_hash_arg = args.get(0).unwrap();
-        let category_arg = args.get(1).unwrap();
-
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-        let category: String = parse_str_u128(category_arg).unwrap();
-
+        let name_hash_arg = args.get(0).ok_or("No name_hash_arg")?;
+        let category_arg = args.get(1).ok_or("No category_arg")?;
+        let name_hash: String = parse_field(name_hash_arg)?;
+        let category: String = parse_str_u128(category_arg)?;
         let mut version = 1;
         let query = "SELECT version FROM ans_name_version WHERE name_hash=$1 limit 1";
-        let query = db_trans.prepare(&query).await.unwrap();
-        let rows = db_trans.query(&query, &[&name_hash]).await.unwrap();
+        let query = db_trans.prepare(&query).await?;
+        let rows = db_trans.query(&query, &[&name_hash]).await?;
         if !rows.is_empty() {
             version = rows.get(0).unwrap().get(0);
         }
-
         db_trans.execute("DELETE from ans_resolver where name_hash=$1 and category=$2 and version=$3 ",
                          &[&name_hash, &category, &version]
-        ).await.unwrap();
-
-        info!("unset_resolver_record: {} {} {}", name_hash, category, version)
+        ).await?;
+        info!("unset_resolver_record: {} {} {}", name_hash, category, version);
+        Ok(())
     } else {
-        error!("set_resolver_record: Error in {} | {}", block.height(), transaction.id())
-    };
+        error!("unset_resolver_record: Error in {} | {}", block.height(), transaction.id());
+        Err("unset_resolver_record: missing future output".into())
+    }
 }
 
-async fn burn<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn burn<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let name_hash_arg = args.get(0).unwrap();
-
-        let name_hash: String = parse_field(name_hash_arg).unwrap();
-
-        db_trans.execute("DELETE from ans_name WHERE name_hash=$1", &[&name_hash]).await.unwrap();
+        let name_hash_arg = args.get(0).ok_or("No name_hash_arg")?;
+        let name_hash: String = parse_field(name_hash_arg)?;
+        db_trans.execute("DELETE from ans_name WHERE name_hash=$1", &[&name_hash]).await?;
         version_update(&db_trans, &block, &transaction, &transition, &name_hash, "").await;
-
-        info!("burn: {} in {}|{}", name_hash, block.height(), transaction.id())
+        info!("burn: {} in {}|{}", name_hash, block.height(), transaction.id());
+        Ok(())
     } else {
-        error!("burn: Error  in {} | {}", block.height(), transaction.id())
-    };
+        error!("burn: Error  in {} | {}", block.height(), transaction.id());
+        Err("burn: missing future output".into())
+    }
 }
 
-async fn transfer_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
-        let amount_arg = args.get(args.len() - 1).unwrap();
-
-        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
-        let amount: u64 = parse_u64(amount_arg).unwrap();
-
+        let transfer_key_arg = args.get(args.len()  - 2).ok_or("No transfer_key_arg")?;
+        let amount_arg = args.get(args.len() - 1).ok_or("No amount_arg")?;
+        let transfer_key: String = parse_field(transfer_key_arg)?;
+        let amount: u64 = parse_u64(amount_arg)?;
         db_trans.execute("INSERT INTO domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&transfer_key, &Decimal::from_u64(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-
-        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+        ).await?;
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id());
+        Ok(())
     } else {
-        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
-    };
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id());
+        Err("transfer_credits: missing future output".into())
+    }
 }
 
-async fn claim_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn claim_credits<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
-        let amount_arg = args.get(args.len() - 1).unwrap();
-
-        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
-        let amount: u64 = parse_u64(amount_arg).unwrap();
-
+        let transfer_key_arg = args.get(args.len()  - 2).ok_or("No transfer_key_arg")?;
+        let amount_arg = args.get(args.len() - 1).ok_or("No amount_arg")?;
+        let transfer_key: String = parse_field(transfer_key_arg)?;
+        let amount: u64 = parse_u64(amount_arg)?;
         db_trans.execute("UPDATE domain_credits SET amount = domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
                          &[&transfer_key, &Decimal::from_u64(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-
-        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+        ).await?;
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id());
+        Ok(())
     } else {
-        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
-    };
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id());
+        Err("claim_credits: missing future output".into())
+    }
 }
 
-async fn transfer_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn transfer_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
-        let amount_arg = args.get(args.len() - 1).unwrap();
-
-        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
-        let amount: u128 = parse_u128(amount_arg).unwrap();
-
+        let transfer_key_arg = args.get(args.len()  - 2).ok_or("No transfer_key_arg")?;
+        let amount_arg = args.get(args.len() - 1).ok_or("No amount_arg")?;
+        let transfer_key: String = parse_field(transfer_key_arg)?;
+        let amount: u128 = parse_u128(amount_arg)?;
         db_trans.execute("INSERT INTO domain_credits (transfer_key, amount, block_height, transaction_id, transition_id) \
                                     VALUES ($1, $2,$3, $4, $5) ON CONFLICT (transfer_key) DO UPDATE SET amount = domain_credits.amount + $2, block_height=$3, transaction_id=$4, transition_id=$5",
                          &[&transfer_key, &Decimal::from_u128(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-
-        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+        ).await?;
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id());
+        Ok(())
     } else {
-        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
-    };
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id());
+        Err("transfer_token: missing future output".into())
+    }
 }
 
-async fn claim_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) {
+async fn claim_token<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outs = transition.outputs();
-    let outs_last = outs.get(outs.len() - 1).unwrap();
+    let outs_last = outs.get(outs.len() - 1).ok_or("No output found")?;
     if let Some(may_future) = outs_last.future() {
         let args = may_future.arguments();
-        let transfer_key_arg = args.get(args.len()  - 2).unwrap();
-        let amount_arg = args.get(args.len() - 1).unwrap();
-
-        let transfer_key: String = parse_field(transfer_key_arg).unwrap();
-        let amount: u128 = parse_u128(amount_arg).unwrap();
-
+        let transfer_key_arg = args.get(args.len()  - 2).ok_or("No transfer_key_arg")?;
+        let amount_arg = args.get(args.len() - 1).ok_or("No amount_arg")?;
+        let transfer_key: String = parse_field(transfer_key_arg)?;
+        let amount: u128 = parse_u128(amount_arg)?;
         db_trans.execute("UPDATE domain_credits SET amount = domain_credits.amount - $2, block_height=$3, transaction_id=$4, transition_id=$5 where transfer_key=$1",
                          &[&transfer_key, &Decimal::from_u128(amount), &(block.height() as i64), &transaction.id().to_string(), &transition.id().to_string()]
-        ).await.unwrap();
-
-        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id())
+        ).await?;
+        info!("transfer_credits: {} {} in {}|{}", transfer_key, amount, block.height(), transaction.id());
+        Ok(())
     } else {
-        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id())
-    };
+        error!("transfer_credits: Error  in {} | {}", block.height(), transaction.id());
+        Err("claim_token: missing future output".into())
+    }
 }
 
 async fn version_update<N: Network>(db_trans: &tokio_postgres::Transaction<'_>, block: &Block<N>, transaction: &Transaction<N>, transition: &Transition<N>, name_hash: &str, owner: &str) {
