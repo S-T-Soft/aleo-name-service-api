@@ -138,7 +138,11 @@ pub async fn sync_data<N: Network>() {
                                     index_data::<N>(&block_json, height).await;
                                 }
                             },
-                            Err(e) => error!("Error parse batch response: {}", e)
+                            Err(e) => error!(
+                                "Error parse batch response: {}, json head: {}",
+                                e,
+                                &response.chars().take(20).collect::<String>()
+                            )
                         }
                     },
                     Err(e) => {
@@ -370,7 +374,17 @@ fn extract_block_basic_info(block_json: &str) -> Result<BlockBasicInfo, serde_js
     }
 
     // Parse JSON
-    let block_filter: BlockFilter = serde_json::from_str(block_json)?;
+    let block_filter: BlockFilter = match serde_json::from_str(block_json) {
+        Ok(bf) => bf,
+        Err(e) => {
+            error!(
+                "Error parsing block_filter: {}, json head: {}",
+                e,
+                &block_json.chars().take(20).collect::<String>()
+            );
+            return Err(e);
+        }
+    };
 
     // Check if the block contains relevant programs
     let has_relevant_programs = block_filter.transactions.iter().any(|tx| {
@@ -419,7 +433,11 @@ async fn index_data<N: Network>(block_json: &str, block_height: u32) {
                     // Process the block data
                     process_block_data(&db_trans, &block).await;
                 },
-                Err(e) => error!("Error parsing block: {}", e),
+                Err(e) => error!(
+                    "Error parsing block: {}, json head: {}",
+                    e,
+                    &block_json.chars().take(20).collect::<String>()
+                ),
             }
         } else {
             info!("Block {} contains no relevant programs, skipping detailed parsing", block_height);
@@ -1076,7 +1094,7 @@ mod tests {
                     }
                 }
             },
-            Err(e) => assert!(false, "Failed to process blocks"),
+            Err(e) => assert!(false, "Failed to process blocks： {}, json head: {}", e, &json_data.chars().take(20).collect::<String>()),
         }
     }
 }
