@@ -16,6 +16,8 @@ lazy_static!{
     static ref TRANSFER_PROGRAM_ID: String = env::var("TRANSFER_PROGRAM_ID").unwrap_or_else(|_| "ans_credit_transfer".to_string());
 }
 
+const INDEXER_HEIGHT_KEY: &str = "indexer_height";
+
 async fn get_name_by_query(pool: &Pool, query: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<NFTWithPrimary, Error> {
     let client = get_db_client(pool).await;
 
@@ -239,10 +241,7 @@ pub(crate) async fn get_statistic_data(pool: &Pool) -> Result<AnsStatistic, Erro
     let total_nft:i64 = row2.get(0);
     let total_owner = row2.get(1);
 
-    let query_last_block = "SELECT height FROM block order by height desc limit 1";
-    let query_last_block = client.prepare(&query_last_block).await.unwrap();
-    let row_last_block = client.query_one(&query_last_block, &[]).await?;
-    let block_height:i64 = row_last_block.get(0);
+    let block_height = query_last_block_height(pool).await;
 
     let st= AnsStatistic {
         healthy: true,
@@ -278,6 +277,16 @@ async fn query_last_block_height(pool: &Pool) -> i64 {
     let client = get_db_client(pool).await;
 
     let mut indexer_height = 0i64;
+
+    let query = "select value from kv where key=$1 limit 1";
+    let query = client.prepare(&query).await.unwrap();
+    if let Ok(row) = client.query_one(&query, &[&INDEXER_HEIGHT_KEY]).await {
+        let value: String = row.get(0);
+        indexer_height = value.parse().unwrap_or(0);
+        info!("set indexer:api_height: {}", indexer_height);
+        return indexer_height;
+    }
+
     let query = "select height from block order by height desc limit 1";
     let query = client.prepare(&query).await.unwrap();
     let row = client.query_one(&query, &[]).await;

@@ -16,11 +16,12 @@ use snarkvm_console_program::{Field, Address, Argument, FromBytes};
 use snarkvm_ledger_block::{Transition};
 use tokio_postgres::NoTls;
 use tracing::{error, info};
-use crate::{client, db, utils};
+use crate::{client, utils};
 use crate::db::{get_kv_value, set_kv_value};
 
 static MAX_BLOCK_RANGE: u32 = 50;
 const CDN_ENDPOINT: &str = "https://s3.us-west-1.amazonaws.com/testnet.blocks/phase3";
+const INDEXER_HEIGHT_KEY: &str = "indexer_height";
 
 #[derive(Debug)]
 struct IndexError(Box<dyn Error>);
@@ -300,6 +301,10 @@ async fn get_next_block_number(init_latest_height: i64) -> Result<(i64, i64), Bo
     let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
     db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await.unwrap();
 
+    if let Ok(value) = get_kv_value(&DB_POOL, INDEXER_HEIGHT_KEY).await {
+        local_latest_height = max(value.parse().unwrap_or(0), local_latest_height);
+    }
+
     let query = "select height from block order by height desc limit 1";
     let query = db_client.prepare(&query).await.unwrap();
     let rows = db_client.query(&query, &[]).await?;
@@ -422,11 +427,11 @@ async fn index_data<N: Network>(block_json: &str, block_height: u32) -> Result<(
     db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await?;
     let db_trans = db_client.transaction().await?;
     if let Ok(basic_info) = extract_block_basic_info(block_json) {
-        db_trans.execute(
-            "INSERT INTO block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
-            &[&(basic_info.height as i64), &basic_info.hash, &basic_info.previous_hash, &basic_info.timestamp]
-        ).await?;
         if basic_info.has_relevant_programs {
+            db_trans.execute(
+                "INSERT INTO block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
+                &[&(basic_info.height as i64), &basic_info.hash, &basic_info.previous_hash, &basic_info.timestamp]
+            ).await?;
             match serde_json::from_str::<Block<N>>(block_json) {
                 Ok(block) => {
                     if let Err(e) = process_block_data(&db_trans, &block).await {
@@ -444,12 +449,24 @@ async fn index_data<N: Network>(block_json: &str, block_height: u32) -> Result<(
         } else {
             info!("Block {} contains no relevant programs, skipping detailed parsing", block_height);
         }
+        set_indexer_height(&db_trans, basic_info.height as i64).await?;
     } else {
         error!("Error extracting basic info from block JSON");
         db_trans.rollback().await?;
         return Err("Error extracting basic info from block JSON".into());
     }
     db_trans.commit().await?;
+    Ok(())
+}
+
+async fn set_indexer_height(db_trans: &tokio_postgres::Transaction<'_>, height: i64) -> Result<(), tokio_postgres::Error> {
+    let value = height.to_string();
+
+    db_trans.execute(
+        "INSERT INTO kv (key, value) VALUES ($1, $2) \
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated = EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT",
+        &[&INDEXER_HEIGHT_KEY, &value]
+    ).await?;
     Ok(())
 }
 

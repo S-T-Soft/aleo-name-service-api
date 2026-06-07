@@ -24,3 +24,6 @@ build
 .env
 target
 logs
+# Claw Code local artifacts
+.claw/settings.local.json
+.claw/sessions/
