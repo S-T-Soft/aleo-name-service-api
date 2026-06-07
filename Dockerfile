@@ -1,12 +1,12 @@
 # stage 1
-FROM rust:1.87.0-bullseye AS builder
+FROM rust:1.93.1-bullseye AS builder
 
 WORKDIR /usr/src/ans_api
 
 COPY . .
 
 RUN apt-get update && apt-get install -y libclang-dev
-RUN cargo install --path .
+RUN cargo install --path . --locked
 
 # stage 2
 FROM debian:bullseye-slim

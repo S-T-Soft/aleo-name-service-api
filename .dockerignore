@@ -1,0 +1,9 @@
+target/
+.git/
+.db/
+.codegraph/
+.cursor/
+.claw.json
+CLAW.md
+.DS_Store
+**/.DS_Store
