@@ -16,6 +16,8 @@ pub async fn run() {
     let db_mgr = deadpool_postgres::Manager::from_config(db_config, NoTls, mgr_config);
     let db_pool = deadpool_postgres::Pool::builder(db_mgr).max_size(2).build().unwrap();
 
+    wait_for_db(&db_pool).await;
+
     loop {
         job_get_statistic_data(&db_pool).await;
         sleep(Duration::from_secs(10)).await;
@@ -35,11 +37,25 @@ pub async fn run() {
     }
 }
 
+async fn wait_for_db(db_pool: &deadpool_postgres::Pool) {
+    loop {
+        match db_pool.get().await {
+            Ok(_) => return,
+            Err(e) => {
+                error!("job db not ready: {}", e);
+                sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
 async fn job_get_api_height(db_pool: &deadpool_postgres::Pool) {
     match client::get_last_height().await {
         Ok(height) => {
             info!("set cache:api_height: {}", height);
-            db::set_kv_value(db_pool, "api_height", &height.to_string()).await;
+            if let Err(e) = db::set_kv_value(db_pool, "api_height", &height.to_string()).await {
+                error!("set cache:api_height fail: {}", e);
+            }
         }
         _ => {error!("set cache:api_height fail!!");}
     }
@@ -52,7 +68,9 @@ async fn job_get_statistic_data(db_pool: &deadpool_postgres::Pool) {
             info!("job_get_statistic_data success!");
             let key = "api_statistic";
             let data_json = serde_json::to_string(&data).expect("Failed get statistic json");
-            db::set_kv_value(db_pool, key, &data_json).await;
+            if let Err(e) = db::set_kv_value(db_pool, key, &data_json).await {
+                error!("set cache:api_statistic fail: {}", e);
+            }
         }
         Err(e) => {
             error!("job_get_statistic_data fail: {}", e);
@@ -84,8 +102,10 @@ async fn job_get_api_host(db_pool: &deadpool_postgres::Pool) {
     }
     if max_height > 0 && !max_url.is_empty() {
         env::set_var("URL_HOST", &max_url);
-        db::set_kv_value(db_pool, "api_host", &max_url).await;
-        info!("job_get_api_host success : {}", &max_url);
+        match db::set_kv_value(db_pool, "api_host", &max_url).await {
+            Ok(_) => info!("job_get_api_host success : {}", &max_url),
+            Err(e) => error!("set cache:api_host fail: {}", e),
+        }
     }
 
 }

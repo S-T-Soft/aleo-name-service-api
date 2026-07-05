@@ -316,7 +316,9 @@ async fn get_next_block_number(init_latest_height: i64) -> Result<(i64, i64), Bo
     if local_latest_height >= latest_height || latest_height - local_latest_height < 11 {
         latest_height = get_latest_height().await as i64;
         if latest_height > init_latest_height {
-            set_kv_value(&DB_POOL, "api_height", &latest_height.to_string()).await;
+            if let Err(e) = set_kv_value(&DB_POOL, "api_height", &latest_height.to_string()).await {
+                error!("set cache:api_height fail: {}", e);
+            }
         }
     }
 
@@ -426,7 +428,9 @@ async fn index_data<N: Network>(block_json: &str, block_height: u32) -> Result<(
     let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
     db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await?;
     let db_trans = db_client.transaction().await?;
+    let indexed_height: i64;
     if let Ok(basic_info) = extract_block_basic_info(block_json) {
+        indexed_height = basic_info.height as i64;
         if basic_info.has_relevant_programs {
             db_trans.execute(
                 "INSERT INTO block (height, block_hash, previous_hash, timestamp) VALUES ($1, $2,$3, $4) ON CONFLICT (height) DO NOTHING",
@@ -449,20 +453,24 @@ async fn index_data<N: Network>(block_json: &str, block_height: u32) -> Result<(
         } else {
             info!("Block {} contains no relevant programs, skipping detailed parsing", block_height);
         }
-        set_indexer_height(&db_trans, basic_info.height as i64).await?;
     } else {
         error!("Error extracting basic info from block JSON");
         db_trans.rollback().await?;
         return Err("Error extracting basic info from block JSON".into());
     }
     db_trans.commit().await?;
+    info!("Indexed block {} committed", indexed_height);
+    set_indexer_height(indexed_height).await?;
     Ok(())
 }
 
-async fn set_indexer_height(db_trans: &tokio_postgres::Transaction<'_>, height: i64) -> Result<(), tokio_postgres::Error> {
+async fn set_indexer_height(height: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let value = height.to_string();
+    let db_client = DB_POOL.get().await?;
+    let db_schema = env::var("DB_SCHEMA").unwrap_or_else(|_| "ansb".to_string());
+    db_client.execute(format!("SET search_path TO {db_schema}").as_str(), &[]).await?;
 
-    db_trans.execute(
+    db_client.execute(
         "INSERT INTO kv (key, value) VALUES ($1, $2) \
          ON CONFLICT (key) DO UPDATE SET value = $2, updated = EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT",
         &[&INDEXER_HEIGHT_KEY, &value]

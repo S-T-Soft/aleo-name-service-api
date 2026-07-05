@@ -1,4 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::env;
 use std::str::FromStr;
 use actix_web::web::Data;
@@ -311,17 +310,14 @@ pub(crate) async fn get_kv_value(pool: &Pool, key: &str) -> Result<String, Error
     Ok(row.get(0))
 }
 
-pub(crate) async fn set_kv_value(pool: &Pool, key: &str, value: &str) {
+pub(crate) async fn set_kv_value(pool: &Pool, key: &str, value: &str) -> Result<(), Error> {
     let client = get_db_client(pool).await;
 
-    let current_time = SystemTime::now();
-    let timestamp = current_time.duration_since(UNIX_EPOCH).expect("Failed to get timestamp");
-    let current_ts = timestamp.as_secs() as i64;
-
     client.execute("INSERT INTO kv (key, value) \
-                             VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated = $3",
-                     &[&key, &value, &current_ts]
-    ).await.unwrap();
+                             VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated = EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT",
+                     &[&key, &value]
+    ).await?;
+    Ok(())
 }
 
 async fn get_db_client(pool: &Pool) -> Object {
