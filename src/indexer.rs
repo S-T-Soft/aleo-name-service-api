@@ -1073,6 +1073,28 @@ mod tests {
     use crate::indexer::{extract_block_basic_info, index_data, parse_str_field, parse_u128, preprocess_json, process_block_data};
 
     #[test]
+    fn test_parse_mainnet_block_with_dynamic_outputs() {
+        // Mainnet block 22369939 contains dynamic Shield Swap outputs alongside
+        // an ANS resolver update. Parsing the whole block must retain that update.
+        // Source: https://api.explorer.provable.com/v1/mainnet/block/22369939
+        let block_json = preprocess_json(include_str!("file/mainnet_block_22369939.json"));
+        let block = serde_json::from_str::<Block<MainnetV0>>(&block_json)
+            .expect("mainnet block 22369939 must parse, including dynamic outputs");
+
+        assert_eq!(block.height(), 22369939);
+        assert_eq!(
+            block.hash().to_string(),
+            "ab1zy60eflwe4x2ckkskgq4yrewq9dtqsvt3azr9xp4xxk6uf989sqqadluk2"
+        );
+        assert!(block.transactions().iter().any(|transaction| {
+            transaction.is_accepted() && transaction.transitions().any(|transition| {
+                transition.program_id().to_string() == "ans_resolver.aleo"
+                    && transition.function_name().to_string() == "set_resolver_record"
+            })
+        }), "the ANS resolver update must remain available to the indexer");
+    }
+
+    #[test]
     fn test_parse_plaintext() {
         let fu = Future::<MainnetV0>::from_str(
             "{ program_id: test.aleo, function_name: test, arguments: [ 418262508645field, 123u128 ] }",
