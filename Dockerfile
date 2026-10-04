@@ -1,5 +1,5 @@
 # stage 1
-FROM rust:1.93.1-bullseye AS builder
+FROM rust:1.93.1-bookworm AS builder
 
 WORKDIR /usr/src/ans_api
 
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y libclang-dev
 RUN cargo install --path . --locked
 
 # stage 2
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # install libssl-dev and ca-certificates
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates libcurl4
